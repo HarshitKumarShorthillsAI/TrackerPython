@@ -5,8 +5,8 @@ from sqlalchemy import and_
 from app.crud.base import CRUDBase
 from app.models.task import Task, TaskStatus, TaskPriority
 from app.models.user import User, UserRole
+from app.models.project_team_members import project_team_members
 from app.schemas.task import TaskCreate, TaskUpdate
-from app.models.project import ProjectTeamMember
 
 class CRUDTask(CRUDBase[Task, TaskCreate, TaskUpdate]):
     def get_multi_by_user(
@@ -106,9 +106,11 @@ class CRUDTask(CRUDBase[Task, TaskCreate, TaskUpdate]):
 
     def can_track_time(self, db: Session, user: User, task: Task) -> bool:
         # Check if user is a project team member
-        project_member = db.query(ProjectTeamMember).filter(
-            ProjectTeamMember.project_id == task.project_id,
-            ProjectTeamMember.user_id == user.id
+        project_member = db.execute(
+            project_team_members.select().where(
+                project_team_members.c.project_id == task.project_id,
+                project_team_members.c.user_id == user.id
+            )
         ).first()
         
         return (

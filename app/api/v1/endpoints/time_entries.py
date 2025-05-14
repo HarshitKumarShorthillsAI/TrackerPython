@@ -63,9 +63,13 @@ def create_time_entry(
         )
     
     # Set hourly rate from project team member rate or user rate
-    project_member = crud.project.get_team_member(db, task.project_id, current_user.id)
+    project_member = crud.project.get_team_member(
+        db=db,
+        project_id=task.project_id,
+        user_id=current_user.id
+    )
     hourly_rate = (
-        project_member.hourly_rate if project_member and project_member.hourly_rate
+        project_member["hourly_rate"] if project_member and project_member.get("hourly_rate")
         else current_user.hourly_rate
     )
     

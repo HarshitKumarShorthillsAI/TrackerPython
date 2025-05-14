@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from app.crud.base import CRUDBase
-from app.models.project import Project, ProjectStatus, ProjectTeamMember
+from app.models.project import Project, ProjectStatus
 from app.models.user import User, UserRole
+from app.models.project_team_members import project_team_members
 from app.schemas.project import ProjectCreate, ProjectUpdate
 
 class CRUDProject(CRUDBase[Project, ProjectCreate, ProjectUpdate]):
@@ -26,6 +27,17 @@ class CRUDProject(CRUDBase[Project, ProjectCreate, ProjectUpdate]):
             query = query.filter(Project.status == status)
         return query.offset(skip).limit(limit).all()
 
+    def get_multi_by_team_member(
+        self, db: Session, *, user_id: int, skip: int = 0, limit: int = 100,
+        status: Optional[ProjectStatus] = None
+    ) -> List[Project]:
+        query = db.query(self.model).join(project_team_members).filter(
+            project_team_members.c.user_id == user_id
+        )
+        if status:
+            query = query.filter(Project.status == status)
+        return query.offset(skip).limit(limit).all()
+
     def create_with_owner(
         self, db: Session, *, obj_in: ProjectCreate, owner_id: int
     ) -> Project:
@@ -37,63 +49,87 @@ class CRUDProject(CRUDBase[Project, ProjectCreate, ProjectUpdate]):
         return db_obj
 
     def get_team_member(
-        self, db: Session, project_id: int, user_id: int
-    ) -> Optional[ProjectTeamMember]:
-        result = db.query(ProjectTeamMember).filter(
-            and_(
-                ProjectTeamMember.project_id == project_id,
-                ProjectTeamMember.user_id == user_id
+        self, db: Session, *, project_id: int, user_id: int
+    ) -> Optional[Dict[str, Any]]:
+        result = db.execute(
+            project_team_members.select().where(
+                project_team_members.c.project_id == project_id,
+                project_team_members.c.user_id == user_id
             )
         ).first()
-        return result
+        return dict(result._mapping) if result else None
 
     def add_team_member(
-        self, db: Session, *, project: Project, user: User, hourly_rate: Optional[float] = None
-    ) -> Project:
-        team_member = ProjectTeamMember(
-            project_id=project.id,
-            user_id=user.id,
-            hourly_rate=hourly_rate
-        )
-        db.add(team_member)
-        db.commit()
-        db.refresh(project)
-        return project
+        self, db: Session, *, project_id: int, user_id: int, hourly_rate: Optional[float] = None
+    ) -> bool:
+        try:
+            values = {
+                "project_id": project_id,
+                "user_id": user_id,
+            }
+            if hourly_rate is not None:
+                values["hourly_rate"] = hourly_rate
+            
+            db.execute(project_team_members.insert().values(**values))
+            db.commit()
+            return True
+        except Exception:
+            db.rollback()
+            return False
 
     def remove_team_member(
-        self, db: Session, *, project: Project, user: User
-    ) -> Project:
-        db.query(ProjectTeamMember).filter(
-            and_(
-                ProjectTeamMember.project_id == project.id,
-                ProjectTeamMember.user_id == user.id
+        self, db: Session, *, project_id: int, user_id: int
+    ) -> bool:
+        try:
+            db.execute(
+                project_team_members.delete().where(
+                    project_team_members.c.project_id == project_id,
+                    project_team_members.c.user_id == user_id
+                )
             )
-        ).delete()
-        db.commit()
-        db.refresh(project)
-        return project
+            db.commit()
+            return True
+        except Exception:
+            db.rollback()
+            return False
+
+    def get_team_member_hourly_rate(
+        self, db: Session, *, project_id: int, user_id: int
+    ) -> Optional[float]:
+        result = db.execute(
+            project_team_members.select().where(
+                project_team_members.c.project_id == project_id,
+                project_team_members.c.user_id == user_id
+            )
+        ).first()
+        return result.hourly_rate if result else None
 
     def update_status(
-        self, db: Session, *, project: Project, status: ProjectStatus
+        self, db: Session, *, db_obj: Project, status: ProjectStatus
     ) -> Project:
-        project.status = status
-        db.add(project)
+        db_obj.status = status
+        db.add(db_obj)
         db.commit()
-        db.refresh(project)
-        return project
+        db.refresh(db_obj)
+        return db_obj
 
     def can_update(self, db: Session, user: User, project: Project) -> bool:
         return (
             user.is_superuser
+            or project.owner_id == user.id
             or project.manager_id == user.id
             or user.role == UserRole.MANAGER
         )
 
     def can_read(self, db: Session, user: User, project: Project) -> bool:
-        if user.is_superuser or project.manager_id == user.id:
-            return True
-        # Check if user is a team member
-        return bool(self.get_team_member(db, project.id, user.id))
+        team_member = self.get_team_member(db, project_id=project.id, user_id=user.id)
+        return (
+            user.is_superuser
+            or project.owner_id == user.id
+            or project.manager_id == user.id
+            or user.role == UserRole.MANAGER
+            or team_member is not None
+        )
 
     def can_manage_team(self, db: Session, user: User, project: Project) -> bool:
         return (
