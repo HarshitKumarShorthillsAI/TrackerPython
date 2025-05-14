@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>{{ project_name }} - New Account</title>
+</head>
+<body>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #333;">Welcome to {{ project_name }}!</h1>
+        <p>Hi there,</p>
+        <p>Your account has been created successfully. Here are your login details:</p>
+        <ul>
+            <li>Username: {{ username }}</li>
+            <li>Email: {{ email }}</li>
+            <li>Password: {{ password }}</li>
+        </ul>
+        <p>Please change your password after your first login.</p>
+        <p>Best regards,<br>{{ project_name }} Team</p>
+    </div>
+</body>
+</html> 
