@@ -1,10 +1,12 @@
 from typing import Any, Dict, Optional, Union, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.orm import joinedload
 
 from app.crud.base import CRUDBase
 from app.models.time_entry import TimeEntry, TimeEntryStatus
 from app.models.user import User, UserRole
+from app.models.project import Project
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryUpdate
 
 class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
@@ -29,16 +31,22 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
         status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
         task_id: Optional[int] = None, billable_only: bool = False
     ) -> List[TimeEntry]:
-        # Get all projects where the user is a manager
-        managed_project_ids = db.query(models.Project.id).filter(
-            models.Project.manager_id == manager_id
-        ).all()
-        managed_project_ids = [p[0] for p in managed_project_ids]
-
-        # Query time entries for managed projects
-        query = db.query(self.model).filter(
-            TimeEntry.project_id.in_(managed_project_ids)
+        # Get the user to check their role
+        user = db.query(User).filter(User.id == manager_id).first()
+        
+        # Base query with eager loading of project relationship
+        query = db.query(self.model).options(
+            joinedload(TimeEntry.project)  # Eager load project relationship
         )
+        
+        # If user has MANAGER role, they can see all time entries
+        # Otherwise, only show time entries for projects they manage
+        if user.role != UserRole.MANAGER:
+            managed_project_ids = db.query(Project.id).filter(
+                Project.manager_id == manager_id
+            ).all()
+            managed_project_ids = [p[0] for p in managed_project_ids]
+            query = query.filter(TimeEntry.project_id.in_(managed_project_ids))
         
         if status:
             query = query.filter(TimeEntry.status == status)

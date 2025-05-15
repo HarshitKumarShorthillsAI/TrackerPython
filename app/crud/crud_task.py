@@ -5,6 +5,7 @@ from sqlalchemy import and_
 from app.crud.base import CRUDBase
 from app.models.task import Task, TaskStatus, TaskPriority
 from app.models.user import User, UserRole
+from app.models.project import Project
 from app.models.project_team_members import project_team_members
 from app.schemas.task import TaskCreate, TaskUpdate
 
@@ -39,6 +40,39 @@ class CRUDTask(CRUDBase[Task, TaskCreate, TaskUpdate]):
             query = query.filter(Task.project_id == project_id)
         return query.offset(skip).limit(limit).all()
 
+    def get_multi_by_owner(
+        self, db: Session, *, owner_id: int, skip: int = 0, limit: int = 100
+    ) -> List[Task]:
+        return (
+            db.query(self.model)
+            .filter(Task.created_by_id == owner_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    def get_multi_by_assigned(
+        self, db: Session, *, assigned_to_id: int, skip: int = 0, limit: int = 100
+    ) -> List[Task]:
+        return (
+            db.query(self.model)
+            .filter(Task.assigned_to_id == assigned_to_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    def get_multi_by_project(
+        self, db: Session, *, project_id: int, skip: int = 0, limit: int = 100
+    ) -> List[Task]:
+        return (
+            db.query(self.model)
+            .filter(Task.project_id == project_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
     def create_with_owner(
         self, db: Session, *, obj_in: TaskCreate, created_by_id: int
     ) -> Task:
@@ -71,21 +105,34 @@ class CRUDTask(CRUDBase[Task, TaskCreate, TaskUpdate]):
         return task
 
     def can_update(self, db: Session, user: User, task: Task) -> bool:
-        return (
-            user.is_superuser
-            or task.created_by_id == user.id
-            or task.project.manager_id == user.id
-            or user.role == UserRole.MANAGER
-        )
+        if user.is_superuser:
+            return True
+        if task.created_by_id == user.id:
+            return True
+        if task.assigned_to_id == user.id:
+            return True
+        if task.project and task.project.manager_id == user.id:
+            return True
+        return False
 
     def can_read(self, db: Session, user: User, task: Task) -> bool:
-        return (
-            user.is_superuser
-            or task.created_by_id == user.id
-            or task.assigned_to_id == user.id
-            or task.project.manager_id == user.id
-            or user.role == UserRole.MANAGER
-        )
+        if user.is_superuser:
+            return True
+        if task.created_by_id == user.id:
+            return True
+        if task.assigned_to_id == user.id:
+            return True
+        if task.project and task.project.manager_id == user.id:
+            return True
+        # Check if user is a team member of the project
+        if task.project:
+            team_member = db.query(project_team_members).filter(
+                project_team_members.c.project_id == task.project_id,
+                project_team_members.c.user_id == user.id
+            ).first()
+            if team_member:
+                return True
+        return False
 
     def can_assign(self, db: Session, user: User, task: Task) -> bool:
         return (

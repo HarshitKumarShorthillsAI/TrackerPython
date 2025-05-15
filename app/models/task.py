@@ -14,6 +14,7 @@ class TaskPriority(str, enum.Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    URGENT = "urgent"
 
 class Task(Base):
     __tablename__ = "task"
@@ -23,11 +24,10 @@ class Task(Base):
     description = Column(String, nullable=True)
     status = Column(Enum(TaskStatus), default=TaskStatus.TODO)
     priority = Column(Enum(TaskPriority), default=TaskPriority.MEDIUM)
-    is_active = Column(Boolean, default=True)
-    estimated_hours = Column(Float, default=0.0)
-    due_date = Column(DateTime(timezone=True), nullable=True)
+    estimated_hours = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    due_date = Column(DateTime(timezone=True), nullable=True)
 
     # Foreign keys
     project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
@@ -38,4 +38,4 @@ class Task(Base):
     project = relationship("Project", back_populates="tasks")
     created_by = relationship("User", foreign_keys=[created_by_id], back_populates="created_tasks")
     assigned_to = relationship("User", foreign_keys=[assigned_to_id], back_populates="assigned_tasks")
-    time_entries = relationship("TimeEntry", back_populates="task") 
+    time_entries = relationship("TimeEntry", back_populates="task", cascade="all, delete-orphan") 
