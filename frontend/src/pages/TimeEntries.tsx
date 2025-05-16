@@ -252,7 +252,7 @@ export const TimeEntries = () => {
             return entry.user_id === user.id;
         });
     }, [timeEntries, user, projects, statusFilter]);
-f
+
     // Separate list for pending approvals section
     const pendingTimeEntries = React.useMemo(() => {
         if (!timeEntries || !user || !projects) return [];
