@@ -120,8 +120,9 @@ export const deleteTask = async (id: number): Promise<void> => {
 };
 
 // Time Entries
-export const getTimeEntries = async (): Promise<TimeEntry[]> => {
-    const response = await api.get('/time-entries');
+export const getTimeEntries = async (status?: string): Promise<TimeEntry[]> => {
+    const params = status ? { status } : {};
+    const response = await api.get('/time-entries', { params });
     return response.data;
 };
 

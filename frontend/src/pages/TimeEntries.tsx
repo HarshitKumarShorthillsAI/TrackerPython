@@ -55,6 +55,107 @@ import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useSnackbar } from 'notistack';
 
+interface PendingApprovalsProps {
+    timeEntries: TimeEntry[];
+    projects: Project[];
+    tasks: Task[];
+    employees: any[];
+    onApprove: (timeEntry: TimeEntry) => void;
+    onReject: (timeEntry: TimeEntry) => void;
+}
+
+const PendingApprovals: React.FC<PendingApprovalsProps> = ({
+    timeEntries,
+    projects,
+    tasks,
+    employees,
+    onApprove,
+    onReject
+}) => {
+    const findProject = (projectId: number) => projects?.find(p => p.id === projectId);
+    const findTask = (taskId: number) => tasks?.find(t => t.id === taskId);
+    const findEmployee = (userId: number) => employees?.find(e => e.id === userId);
+
+    if (!timeEntries.length) {
+        return (
+            <Paper sx={{ p: 2, mb: 2 }}>
+                <Typography variant="subtitle1" color="textSecondary">
+                    No pending approvals
+                </Typography>
+            </Paper>
+        );
+    }
+
+    return (
+        <Paper sx={{ p: 2, mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+                Pending Approvals
+            </Typography>
+            <TableContainer>
+                <Table>
+                    <TableHead>
+                        <TableRow>
+                            <TableCell>Employee</TableCell>
+                            <TableCell>Project</TableCell>
+                            <TableCell>Task</TableCell>
+                            <TableCell>Description</TableCell>
+                            <TableCell>Date</TableCell>
+                            <TableCell>Duration</TableCell>
+                            <TableCell>Actions</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {timeEntries.map((entry) => {
+                            const project = findProject(entry.project_id);
+                            const task = findTask(entry.task_id);
+                            const employee = findEmployee(entry.user_id);
+                            
+                            return (
+                                <TableRow key={entry.id}>
+                                    <TableCell>
+                                        {employee?.full_name || employee?.email || 'Unknown'}
+                                    </TableCell>
+                                    <TableCell>{project?.name || 'Unknown'}</TableCell>
+                                    <TableCell>{task?.title || 'Unknown'}</TableCell>
+                                    <TableCell>{entry.description}</TableCell>
+                                    <TableCell>
+                                        {format(parseISO(entry.start_time), 'MMM d, yyyy')}
+                                    </TableCell>
+                                    <TableCell>
+                                        {calculateDuration(entry)}
+                                    </TableCell>
+                                    <TableCell>
+                                        <Stack direction="row" spacing={1}>
+                                            <Tooltip title="Approve">
+                                                <IconButton
+                                                    color="success"
+                                                    onClick={() => onApprove(entry)}
+                                                    size="small"
+                                                >
+                                                    <Check />
+                                                </IconButton>
+                                            </Tooltip>
+                                            <Tooltip title="Reject">
+                                                <IconButton
+                                                    color="error"
+                                                    onClick={() => onReject(entry)}
+                                                    size="small"
+                                                >
+                                                    <Close />
+                                                </IconButton>
+                                            </Tooltip>
+                                        </Stack>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+        </Paper>
+    );
+};
+
 export const TimeEntries = () => {
     const [activeTimer, setActiveTimer] = useState<number | null>(null);
     const [elapsedTime, setElapsedTime] = useState<string>('00:00:00');
@@ -79,6 +180,7 @@ export const TimeEntries = () => {
         startDate: null,
         endDate: null
     });
+    const [statusFilter, setStatusFilter] = useState<TimeEntryStatus | 'ALL'>('ALL');
     
     const queryClient = useQueryClient();
     const { user } = useAuth();
@@ -97,10 +199,11 @@ export const TimeEntries = () => {
     });
 
     const { data: timeEntries, isLoading: isLoadingTimeEntries } = useQuery({
-        queryKey: ['timeEntries'],
-        queryFn: api.getTimeEntries
+        queryKey: ['timeEntries', statusFilter],
+        queryFn: () => api.getTimeEntries(statusFilter !== 'ALL' ? statusFilter : undefined)
     });
 
+    // Query for employees data
     const { data: employees } = useQuery({
         queryKey: ['employees'],
         queryFn: api.getEmployees,
@@ -122,54 +225,58 @@ export const TimeEntries = () => {
         return task.project_id === selectedProject;
     }) || [];
 
-    // Filter time entries based on user role and showPendingOnly flag
-    const filteredTimeEntries = timeEntries?.filter(entry => {
-        if (user?.is_superuser) {
+    // Filter time entries based on user role and status
+    const filteredTimeEntries = React.useMemo(() => {
+        if (!timeEntries || !user || !projects) return [];
+
+        return timeEntries.filter(entry => {
+            // Apply status filter first
+            if (statusFilter !== 'ALL' && entry.status !== statusFilter) {
+                return false;
+            }
+
             // Superusers can see all time entries
-            if (showPendingOnly) {
-                return entry.status === TimeEntryStatus.SUBMITTED;
+            if (user.is_superuser) {
+                return true;
             }
-            return true;
-        }
-        
-        if (user?.role === UserRole.MANAGER) {
-            // For managers, show time entries from their projects
-            const isManagersProject = projects?.some(project => 
-                project.id === entry.project_id && 
-                (project.manager_id === user.id || project.team_members?.includes(user.id))
-            );
             
-            if (showPendingOnly) {
-                return isManagersProject && entry.status === TimeEntryStatus.SUBMITTED;
+            // Managers can see all time entries from their projects
+            if (user.role === UserRole.MANAGER) {
+                return projects.some(project => 
+                    project.id === entry.project_id && 
+                    (project.manager_id === user.id || project.team_members?.includes(user.id))
+                );
             }
-            return isManagersProject;
-        }
-        
-        // For regular employees, show only their own time entries
-        return entry.user_id === user?.id;
-    });
-
+            
+            // Regular employees can only see their own time entries
+            return entry.user_id === user.id;
+        });
+    }, [timeEntries, user, projects, statusFilter]);
+f
     // Separate list for pending approvals section
-    const pendingTimeEntries = timeEntries?.filter(entry => {
-        if (!user) return false;
+    const pendingTimeEntries = React.useMemo(() => {
+        if (!timeEntries || !user || !projects) return [];
 
-        // Only show SUBMITTED entries
-        if (entry.status !== TimeEntryStatus.SUBMITTED) return false;
+        return timeEntries.filter(entry => {
+            // Only show SUBMITTED entries
+            if (entry.status !== TimeEntryStatus.SUBMITTED) return false;
 
-        if (user.is_superuser) {
-            return true; // Superusers see all pending entries
-        }
+            // Superusers can see all pending entries
+            if (user.is_superuser) {
+                return true;
+            }
 
-        if (user.role === UserRole.MANAGER) {
-            // For managers, show pending entries from their projects
-            return projects?.some(project => 
-                project.id === entry.project_id && 
-                (project.manager_id === user.id || project.team_members?.includes(user.id))
-            );
-        }
+            // Managers can see pending entries from their projects
+            if (user.role === UserRole.MANAGER) {
+                return projects.some(project => 
+                    project.id === entry.project_id && 
+                    (project.manager_id === user.id || project.team_members?.includes(user.id))
+                );
+            }
 
-        return false;
-    });
+            return false;
+        });
+    }, [timeEntries, user, projects]);
 
     // Add debugging logs
     useEffect(() => {
@@ -178,10 +285,11 @@ export const TimeEntries = () => {
                 count: pendingTimeEntries.length,
                 entries: pendingTimeEntries,
                 userRole: user.role,
-                isSuperuser: user.is_superuser
+                isSuperuser: user.is_superuser,
+                projects: projects
             });
         }
-    }, [pendingTimeEntries, user]);
+    }, [pendingTimeEntries, user, projects]);
 
     // Mutations
     const createMutation = useMutation({
@@ -486,7 +594,24 @@ export const TimeEntries = () => {
     // Add a filter toolbar above the time entries table
     const renderFilterToolbar = () => (
         <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ display: 'flex', gap: 2 }}>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                    <FormControl sx={{ minWidth: 200 }}>
+                        <InputLabel>Status Filter</InputLabel>
+                        <Select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value as TimeEntryStatus | 'ALL')}
+                            label="Status Filter"
+                        >
+                            <MenuItem value="ALL">All Statuses</MenuItem>
+                            <MenuItem value={TimeEntryStatus.DRAFT}>Draft</MenuItem>
+                            <MenuItem value={TimeEntryStatus.SUBMITTED}>Pending Approval</MenuItem>
+                            <MenuItem value={TimeEntryStatus.APPROVED}>Approved</MenuItem>
+                            <MenuItem value={TimeEntryStatus.REJECTED}>Rejected</MenuItem>
+                            <MenuItem value={TimeEntryStatus.BILLED}>Billed</MenuItem>
+                        </Select>
+                    </FormControl>
+                )}
                 <LocalizationProvider dateAdapter={AdapterDateFns}>
                     <DateTimePicker
                         label="From Date"
@@ -552,6 +677,17 @@ export const TimeEntries = () => {
 
     return (
         <Container maxWidth="xl">
+            {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                <PendingApprovals
+                    timeEntries={pendingTimeEntries}
+                    projects={projects || []}
+                    tasks={tasks || []}
+                    employees={employees || []}
+                    onApprove={handleApproveTimeEntry}
+                    onReject={handleOpenRejectDialog}
+                />
+            )}
+            
             <Box sx={{ mb: 4 }}>
                 <Typography variant="h4" gutterBottom>
                     Time Entries
@@ -699,90 +835,6 @@ export const TimeEntries = () => {
                     </CardContent>
                 </Card>
             </Box>
-
-            {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
-                <Box sx={{ mb: 4 }}>
-                    <Typography variant="h5" gutterBottom>
-                        Pending Approvals
-                    </Typography>
-                    <Paper sx={{ p: 2, mb: 2 }}>
-                        <TableContainer>
-                            <Table>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell>Employee</TableCell>
-                                        <TableCell>Project</TableCell>
-                                        <TableCell>Task</TableCell>
-                                        <TableCell>Description</TableCell>
-                                        <TableCell>Start Time</TableCell>
-                                        <TableCell>End Time</TableCell>
-                                        <TableCell>Duration</TableCell>
-                                        <TableCell>Cost</TableCell>
-                                        <TableCell>Status</TableCell>
-                                        <TableCell>Actions</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {pendingTimeEntries?.map((entry) => {
-                                        const employee = employees?.find(e => e.id === entry.user_id);
-                                        return (
-                                            <TableRow key={entry.id}>
-                                                <TableCell>
-                                                    {employee?.full_name || employee?.email || 'Unknown'}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {findProject(entry.project_id)?.name}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {tasks?.find(t => t.id === entry.task_id)?.title}
-                                                </TableCell>
-                                                <TableCell>{entry.description}</TableCell>
-                                                <TableCell>
-                                                    {format(parseISO(entry.start_time), 'yyyy-MM-dd HH:mm')}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {entry.end_time && format(parseISO(entry.end_time), 'yyyy-MM-dd HH:mm')}
-                                                </TableCell>
-                                                <TableCell>{calculateDuration(entry)}</TableCell>
-                                                <TableCell>${calculateCost(entry)}</TableCell>
-                                                <TableCell>
-                                                    <Chip
-                                                        label={entry.status}
-                                                        color={getStatusChipColor(entry.status)}
-                                                        size="small"
-                                                    />
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Stack direction="row" spacing={1}>
-                                                        <Tooltip title="Approve">
-                                                            <IconButton
-                                                                size="small"
-                                                                color="success"
-                                                                onClick={() => handleApproveTimeEntry(entry)}
-                                                            >
-                                                                <Check />
-                                                            </IconButton>
-                                                        </Tooltip>
-                                                        <Tooltip title="Reject">
-                                                            <IconButton
-                                                                size="small"
-                                                                color="error"
-                                                                onClick={() => handleOpenRejectDialog(entry)}
-                                                            >
-                                                                <Close />
-                                                            </IconButton>
-                                                        </Tooltip>
-                                                    </Stack>
-                                                </TableCell>
-                                            </TableRow>
-                                        );
-                                    })}
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
-                    </Paper>
-                </Box>
-            )}
 
             <Typography variant="h5" gutterBottom>
                 {user?.is_superuser || user?.role === UserRole.MANAGER ? 'All Time Entries' : 'My Time Entries'}

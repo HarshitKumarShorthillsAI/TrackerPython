@@ -7,7 +7,7 @@ from app.crud.crud_time_entry import crud_time_entry
 from app.crud.crud_task import task as crud_task
 from app.crud.crud_project import project as crud_project
 from app.models.time_entry import TimeEntryStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.time_entry import (
     TimeEntry,
     TimeEntryCreate,
@@ -29,10 +29,23 @@ def get_time_entries(
 ) -> List[TimeEntry]:
     """
     Get time entries.
-    If user is manager or superuser, returns all time entries they have access to.
+    If user is superuser, returns all time entries.
+    If user is manager, returns all time entries from their projects.
     Otherwise, returns only the user's own time entries.
     """
-    if current_user.is_superuser or current_user.role == "MANAGER":
+    if current_user.is_superuser:
+        # Superusers can see all time entries
+        time_entries = crud_time_entry.get_multi(
+            db,
+            skip=skip,
+            limit=limit,
+            status=status,
+            project_id=project_id,
+            task_id=task_id,
+            billable_only=billable_only
+        )
+    elif current_user.role == UserRole.MANAGER:
+        # Managers can see all time entries from their projects
         time_entries = crud_time_entry.get_multi_by_manager(
             db,
             manager_id=current_user.id,
@@ -44,6 +57,7 @@ def get_time_entries(
             billable_only=billable_only
         )
     else:
+        # Regular employees can only see their own time entries
         time_entries = crud_time_entry.get_multi_by_user(
             db,
             user_id=current_user.id,
