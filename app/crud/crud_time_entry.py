@@ -1,16 +1,32 @@
 from typing import Any, Dict, Optional, Union, List
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, or_
 from datetime import datetime
 
 from app.crud.base import CRUDBase
 from app.models.time_entry import TimeEntry, TimeEntryStatus
 from app.models.user import User, UserRole
 from app.models.project import Project
+from app.models.project_team_members import project_team_members
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryUpdate
 
 class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
+    def get_multi(
+        self, db: Session, *, skip: int = 0, limit: int = 100,
+        status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
+        task_id: Optional[int] = None, billable_only: bool = False
+    ) -> List[TimeEntry]:
+        query = db.query(self.model)
+        if status:
+            query = query.filter(TimeEntry.status == status)
+        if project_id:
+            query = query.filter(TimeEntry.project_id == project_id)
+        if task_id:
+            query = query.filter(TimeEntry.task_id == task_id)
+        if billable_only:
+            query = query.filter(TimeEntry.billable == True)
+        return query.offset(skip).limit(limit).all()
+
     def get_multi_by_user(
         self, db: Session, *, user_id: int, skip: int = 0, limit: int = 100,
         status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
@@ -32,23 +48,26 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
         status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
         task_id: Optional[int] = None, billable_only: bool = False
     ) -> List[TimeEntry]:
-        # Get the user to check their role
-        user = db.query(User).filter(User.id == manager_id).first()
+        # Get all projects where user is manager
+        managed_project_ids = db.query(Project.id).filter(
+            Project.manager_id == manager_id
+        ).all()
+        managed_project_ids = [p[0] for p in managed_project_ids]
         
-        # Base query with eager loading of project relationship
+        # Base query with eager loading
         query = db.query(self.model).options(
-            joinedload(TimeEntry.project)  # Eager load project relationship
+            joinedload(TimeEntry.user),
+            joinedload(TimeEntry.project),
+            joinedload(TimeEntry.task)
         )
         
-        # If user has MANAGER role, they can see all time entries
-        # Otherwise, only show time entries for projects they manage
-        if user.role != UserRole.MANAGER:
-            managed_project_ids = db.query(Project.id).filter(
-                Project.manager_id == manager_id
-            ).all()
-            managed_project_ids = [p[0] for p in managed_project_ids]
+        # Filter by managed projects
+        if managed_project_ids:
             query = query.filter(TimeEntry.project_id.in_(managed_project_ids))
+        else:
+            return []  # Return empty list if no managed projects
         
+        # Apply additional filters
         if status:
             query = query.filter(TimeEntry.status == status)
         if project_id:
@@ -57,6 +76,7 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
             query = query.filter(TimeEntry.task_id == task_id)
         if billable_only:
             query = query.filter(TimeEntry.billable == True)
+        
         return query.offset(skip).limit(limit).all()
 
     def create_with_owner(
