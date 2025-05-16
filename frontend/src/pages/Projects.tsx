@@ -13,6 +13,7 @@ import {
     DialogContent,
     DialogActions,
     Select,
+
     MenuItem,
     FormControl,
     InputLabel,
@@ -67,6 +68,10 @@ export const Projects = () => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             handleCloseDialog();
         },
+        onError: (error: any) => {
+            console.error('Error creating project:', error);
+            alert('Failed to create project. Please try again.');
+        }
     });
 
     const updateMutation = useMutation({
@@ -76,6 +81,10 @@ export const Projects = () => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             handleCloseDialog();
         },
+        onError: (error: any) => {
+            console.error('Error updating project:', error);
+            alert('Failed to update project. Please try again.');
+        }
     });
 
     const deleteMutation = useMutation({
@@ -90,10 +99,10 @@ export const Projects = () => {
                 name: project.name,
                 description: project.description || '',
                 status: project.status,
-                budget_hours: project.budget_hours,
-                hourly_rate: project.hourly_rate,
-                team_members: project.team_members.map((member) => member.id),
-                manager_id: project.manager_id,
+                budget_hours: project.budget_hours || 0,
+                hourly_rate: project.hourly_rate || 0,
+                team_members: project.team_members?.map(member => member.id) || [],
+                manager_id: project.manager_id || user?.id || 0,
             });
         } else {
             setEditingProject(null);
@@ -104,7 +113,7 @@ export const Projects = () => {
                 budget_hours: 0,
                 hourly_rate: 0,
                 team_members: [],
-                manager_id: 0,
+                manager_id: user?.id || 0,
             });
         }
         setDialogOpen(true);
@@ -120,19 +129,24 @@ export const Projects = () => {
             budget_hours: 0,
             hourly_rate: 0,
             team_members: [],
-            manager_id: 0,
+            manager_id: user?.id || 0,
         });
     };
 
     const handleSubmit = () => {
+        if (!formData.name) {
+            alert('Project name is required');
+            return;
+        }
+
         const projectData = {
             name: formData.name,
             description: formData.description,
             status: formData.status,
-            budget_hours: formData.budget_hours,
-            hourly_rate: formData.hourly_rate,
-            manager_id: formData.manager_id,
-            team_members: formData.team_members
+            budget_hours: Number(formData.budget_hours),
+            hourly_rate: Number(formData.hourly_rate),
+            manager_id: formData.manager_id || null,
+            team_members: formData.team_members || []
         };
 
         if (editingProject) {
@@ -143,18 +157,25 @@ export const Projects = () => {
         } else {
             createMutation.mutate(projectData);
         }
+        handleCloseDialog();
     };
 
-    const handleOpenTeamDialog = (project: Project) => {
-        setSelectedProject(project);
-        setTeamDialogOpen(true);
+    const handleOpenTeamDialog = async (project: Project) => {
+        try {
+            const projectDetails = await api.getProject(project.id);
+            setSelectedProject(projectDetails);
+            setTeamDialogOpen(true);
+        } catch (error) {
+            console.error('Error fetching project details:', error);
+            alert('Failed to fetch project details. Please try again.');
+        }
     };
 
     const getStatusChipColor = (status: ProjectStatus) => {
         switch (status) {
             case ProjectStatus.PLANNED:
                 return 'default';
-            case ProjectStatus.ACTIVE:
+            case ProjectStatus.IN_PROGRESS:
                 return 'primary';
             case ProjectStatus.ON_HOLD:
                 return 'warning';
@@ -167,8 +188,10 @@ export const Projects = () => {
         }
     };
 
-    const canManageProject = (project: Project) =>
-        user?.is_superuser || project.manager_id === user?.id;
+    const canManageProject = (project: Project | null) => {
+        if (!project || !user) return false;
+        return user.is_superuser || project.manager_id === user.id;
+    };
 
     return (
         <Box>
@@ -221,7 +244,9 @@ export const Projects = () => {
                                         <>
                                             <IconButton
                                                 size="small"
-                                                onClick={() => handleOpenDialog(project)}
+                                                onClick={() => {
+                                                    handleOpenDialog(project);
+                                                }}
                                             >
                                                 <Edit />
                                             </IconButton>
@@ -251,12 +276,14 @@ export const Projects = () => {
                         <Grid item xs={12}>
                             <TextField
                                 fullWidth
-                                label="Name"
+                                label="Name *"
                                 value={formData.name}
                                 onChange={(e) =>
                                     setFormData({ ...formData, name: e.target.value })
                                 }
                                 margin="normal"
+                                required
+                                error={!formData.name}
                             />
                         </Grid>
                         <Grid item xs={12}>
@@ -287,7 +314,7 @@ export const Projects = () => {
                                 >
                                     {Object.values(ProjectStatus).map((status) => (
                                         <MenuItem key={status} value={status}>
-                                            {status}
+                                            {status.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
                                         </MenuItem>
                                     ))}
                                 </Select>
@@ -306,6 +333,7 @@ export const Projects = () => {
                                     })
                                 }
                                 margin="normal"
+                                inputProps={{ min: 0 }}
                             />
                         </Grid>
                         <Grid item xs={6}>
@@ -321,7 +349,32 @@ export const Projects = () => {
                                     })
                                 }
                                 margin="normal"
+                                inputProps={{ min: 0 }}
                             />
+                        </Grid>
+                        <Grid item xs={12}>
+                            <FormControl fullWidth margin="normal">
+                                <InputLabel>Manager</InputLabel>
+                                <Select
+                                    value={formData.manager_id || ''}
+                                    onChange={(e) =>
+                                        setFormData({
+                                            ...formData,
+                                            manager_id: e.target.value as number,
+                                        })
+                                    }
+                                    label="Manager"
+                                >
+                                    <MenuItem value="">
+                                        <em>None</em>
+                                    </MenuItem>
+                                    {users?.filter(u => u.role === 'manager').map((user) => (
+                                        <MenuItem key={user.id} value={user.id}>
+                                            {user.full_name}
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
                         </Grid>
                         <Grid item xs={12}>
                             <FormControl fullWidth margin="normal">
@@ -336,8 +389,19 @@ export const Projects = () => {
                                         })
                                     }
                                     label="Team Members"
+                                    renderValue={(selected) => (
+                                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                            {(selected as number[]).map((value) => (
+                                                <Chip
+                                                    key={value}
+                                                    label={users?.find(u => u.id === value)?.full_name || ''}
+                                                    size="small"
+                                                />
+                                            ))}
+                                        </Box>
+                                    )}
                                 >
-                                    {users?.map((user) => (
+                                    {users?.filter(u => u.role === 'employee').map((user) => (
                                         <MenuItem key={user.id} value={user.id}>
                                             {user.full_name}
                                         </MenuItem>
@@ -349,13 +413,13 @@ export const Projects = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleCloseDialog}>Cancel</Button>
-                    <Button onClick={handleSubmit} color="primary">
+                    <Button onClick={handleSubmit} color="primary" disabled={!formData.name}>
                         {editingProject ? 'Save' : 'Create'}
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* Team Members Dialog */}
+            {/* Team Members Dialog - View Only */}
             <Dialog
                 open={teamDialogOpen}
                 onClose={() => setTeamDialogOpen(false)}
@@ -364,16 +428,36 @@ export const Projects = () => {
             >
                 <DialogTitle>Team Members</DialogTitle>
                 <DialogContent>
-                    <Grid container spacing={1}>
-                        {selectedProject?.team_members.map((member) => (
-                            <Grid item key={member.id}>
-                                <Chip label={member.full_name} />
-                            </Grid>
-                        ))}
-                    </Grid>
+                    <Box mt={2}>
+                        <Grid container spacing={1}>
+                            {selectedProject?.team_members?.map((member) => (
+                                <Grid item key={member.id}>
+                                    <Chip 
+                                        label={member.full_name}
+                                    />
+                                </Grid>
+                            ))}
+                            {(!selectedProject?.team_members || selectedProject.team_members.length === 0) && (
+                                <Grid item xs={12}>
+                                    <Typography color="textSecondary">No team members assigned</Typography>
+                                </Grid>
+                            )}
+                        </Grid>
+                    </Box>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setTeamDialogOpen(false)}>Close</Button>
+                    {selectedProject && canManageProject(selectedProject) && (
+                        <Button 
+                            color="primary"
+                            onClick={() => {
+                                setTeamDialogOpen(false);
+                                handleOpenDialog(selectedProject);
+                            }}
+                        >
+                            Edit Project
+                        </Button>
+                    )}
                 </DialogActions>
             </Dialog>
         </Box>

@@ -26,6 +26,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 interface UserFormData {
     email: string;
+    username: string;
     full_name: string;
     password?: string;
     hourly_rate?: number;
@@ -38,6 +39,7 @@ export const Users = () => {
     const [editingUser, setEditingUser] = useState<User | null>(null);
     const [formData, setFormData] = useState<UserFormData>({
         email: '',
+        username: '',
         full_name: '',
         password: '',
         hourly_rate: 0,
@@ -48,28 +50,31 @@ export const Users = () => {
     const queryClient = useQueryClient();
     const { user, isAdmin } = useAuth();
 
-    const { data: users } = useQuery(['users'], api.getUsers);
-
-    const createMutation = useMutation(api.createUser, {
-        onSuccess: () => {
-            queryClient.invalidateQueries(['users']);
-            handleCloseDialog();
-        },
+    const { data: users } = useQuery({
+        queryKey: ['users'],
+        queryFn: api.getUsers
     });
 
-    const updateMutation = useMutation(
-        (data: { id: number; user: Partial<User> }) =>
-            api.updateUser(data.id, data.user),
-        {
-            onSuccess: () => {
-                queryClient.invalidateQueries(['users']);
-                handleCloseDialog();
-            },
+    const createMutation = useMutation({
+        mutationFn: api.createUser,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['users'] });
+            handleCloseDialog();
         }
-    );
+    });
 
-    const deleteMutation = useMutation(api.deleteUser, {
-        onSuccess: () => queryClient.invalidateQueries(['users']),
+    const updateMutation = useMutation({
+        mutationFn: (data: { id: number; user: Partial<User> }) =>
+            api.updateUser(data.id, data.user),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['users'] });
+            handleCloseDialog();
+        }
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: api.deleteUser,
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] })
     });
 
     const handleOpenDialog = (user?: User) => {
@@ -77,6 +82,7 @@ export const Users = () => {
             setEditingUser(user);
             setFormData({
                 email: user.email,
+                username: user.username,
                 full_name: user.full_name,
                 hourly_rate: user.hourly_rate,
                 role: user.role,
@@ -86,6 +92,7 @@ export const Users = () => {
             setEditingUser(null);
             setFormData({
                 email: '',
+                username: '',
                 full_name: '',
                 password: '',
                 hourly_rate: 0,
@@ -103,14 +110,30 @@ export const Users = () => {
 
     const handleSubmit = () => {
         if (editingUser) {
-            const { password, ...updateData } = formData;
             updateMutation.mutate({
                 id: editingUser.id,
-                user: updateData,
+                user: {
+                    email: formData.email,
+                    username: formData.username,
+                    full_name: formData.full_name,
+                    hourly_rate: formData.hourly_rate,
+                    role: formData.role,
+                    is_active: formData.is_active,
+                    password: formData.password,
+                }
             });
         } else {
-            createMutation.mutate(formData);
+            createMutation.mutate({
+                email: formData.email,
+                username: formData.email,
+                full_name: formData.full_name,
+                password: formData.password || '',
+                hourly_rate: formData.hourly_rate,
+                role: formData.role,
+                is_active: formData.is_active,
+            });
         }
+        handleCloseDialog();
     };
 
     const getRoleChipColor = (role: UserRole) => {
@@ -217,7 +240,11 @@ export const Users = () => {
                                 type="email"
                                 value={formData.email}
                                 onChange={(e) =>
-                                    setFormData({ ...formData, email: e.target.value })
+                                    setFormData({ 
+                                        ...formData, 
+                                        email: e.target.value,
+                                        username: e.target.value
+                                    })
                                 }
                                 margin="normal"
                             />

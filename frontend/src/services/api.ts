@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { LoginRequest, LoginResponse, Project, Task, TimeEntry, User } from '../types';
 
-const API_URL = 'http://localhost:8005/api/v1';
+const API_URL = 'http://localhost:8010/api/v1';
 
 const api = axios.create({
     baseURL: API_URL,
@@ -11,6 +11,10 @@ api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Add trailing slash to URLs that don't have one
+    if (!config.url?.endsWith('/')) {
+        config.url = `${config.url}/`;
     }
     return config;
 });
@@ -51,6 +55,11 @@ export const getUsers = async (): Promise<User[]> => {
     return response.data;
 };
 
+export const getEmployees = async (): Promise<User[]> => {
+    const response = await api.get('/users/employees');
+    return response.data;
+};
+
 export const createUser = async (data: Partial<User>): Promise<User> => {
     const response = await api.post('/users', data);
     return response.data;
@@ -68,6 +77,11 @@ export const deleteUser = async (id: number): Promise<void> => {
 // Projects
 export const getProjects = async (): Promise<Project[]> => {
     const response = await api.get('/projects');
+    return response.data;
+};
+
+export const getProject = async (id: number): Promise<Project> => {
+    const response = await api.get(`/projects/${id}`);
     return response.data;
 };
 
@@ -126,12 +140,12 @@ export const deleteTimeEntry = async (id: number): Promise<void> => {
 };
 
 export const submitTimeEntry = async (id: number): Promise<TimeEntry> => {
-    const response = await api.put(`/time-entries/${id}/submit`);
+    const response = await api.post(`/time-entries/${id}/submit`);
     return response.data;
 };
 
 export const approveTimeEntry = async (id: number): Promise<TimeEntry> => {
-    const response = await api.put(`/time-entries/${id}/approve`);
+    const response = await api.post(`/time-entries/${id}/approve`);
     return response.data;
 };
 

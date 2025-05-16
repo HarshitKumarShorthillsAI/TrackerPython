@@ -6,16 +6,16 @@ export enum UserRole {
 }
 
 export enum TimeEntryStatus {
-    DRAFT = 'draft',
-    SUBMITTED = 'submitted',
-    APPROVED = 'approved',
-    REJECTED = 'rejected',
-    BILLED = 'billed'
+    DRAFT = 'DRAFT',
+    SUBMITTED = 'SUBMITTED',
+    APPROVED = 'APPROVED',
+    REJECTED = 'REJECTED',
+    BILLED = 'BILLED'
 }
 
 export enum ProjectStatus {
     PLANNED = 'planned',
-    ACTIVE = 'active',
+    IN_PROGRESS = 'in_progress',
     ON_HOLD = 'on_hold',
     COMPLETED = 'completed',
     CANCELLED = 'cancelled'
@@ -57,7 +57,7 @@ export interface Project {
     updated_at: string;
     manager_id?: number;
     owner_id?: number;
-    team_members: User[];
+    team_members: number[];
 }
 
 export interface Task {
@@ -73,7 +73,6 @@ export interface Task {
     project_id: number;
     created_by_id?: number;
     assigned_to_id?: number;
-    is_active: boolean;
 }
 
 export interface TaskCreate {
@@ -85,7 +84,6 @@ export interface TaskCreate {
     due_date?: string;
     project_id: number;
     assigned_to_id?: number;
-    is_active: boolean;
 }
 
 export interface TimeEntry {
@@ -102,6 +100,7 @@ export interface TimeEntry {
     created_at: string;
     updated_at: string;
     approved_by_id?: number;
+    rejection_reason?: string;
 }
 
 export interface LoginRequest {
@@ -117,4 +116,14 @@ export interface LoginResponse {
 export interface TokenPayload {
     exp: number;
     sub: string;
+}
+
+interface UserFormData {
+    email: string;
+    username: string;
+    full_name: string;
+    password?: string;
+    hourly_rate?: number;
+    role: UserRole;
+    is_active: boolean;
 } 

@@ -61,9 +61,9 @@ export const Tasks = () => {
         queryKey: ['projects'],
         queryFn: api.getProjects
     });
-    const { data: users } = useQuery({
-        queryKey: ['users'],
-        queryFn: api.getUsers
+    const { data: employees } = useQuery({
+        queryKey: ['employees'],
+        queryFn: api.getEmployees
     });
 
     const createMutation = useMutation({
@@ -94,8 +94,8 @@ export const Tasks = () => {
             setFormData({
                 title: task.title,
                 description: task.description || '',
-                status: task.status,
-                priority: task.priority,
+                status: task.status as TaskStatus,
+                priority: task.priority as TaskPriority,
                 estimated_hours: task.estimated_hours,
                 due_date: task.due_date?.split('T')[0] || new Date().toISOString().split('T')[0],
                 project_id: task.project_id,
@@ -123,19 +123,29 @@ export const Tasks = () => {
     };
 
     const handleSubmit = () => {
+        if (!formData.project_id) {
+            alert('Please select a project');
+            return;
+        }
+
+        const taskData = {
+            title: formData.title,
+            description: formData.description,
+            status: formData.status,
+            priority: formData.priority,
+            estimated_hours: formData.estimated_hours,
+            due_date: formData.due_date ? new Date(formData.due_date).toISOString() : undefined,
+            project_id: formData.project_id,
+            assigned_to_id: formData.assigned_to_id || undefined
+        };
+
         if (editingTask) {
             updateMutation.mutate({
                 id: editingTask.id,
-                task: {
-                    ...formData,
-                    is_active: true
-                },
+                task: taskData,
             });
         } else {
-            createMutation.mutate({
-                ...formData,
-                is_active: true
-            });
+            createMutation.mutate(taskData);
         }
     };
 
@@ -173,17 +183,27 @@ export const Tasks = () => {
         task.assigned_to_id === user?.id;
 
     const getAvailableTeamMembers = () => {
-        if (!formData.project_id) return [];
-        const selectedProject = projects?.find(p => p.id === formData.project_id);
-        return selectedProject?.team_members || [];
+        return employees || [];
     };
 
-    const handleProjectChange = (projectId: number) => {
+    const handleProjectChange = async (projectId: number) => {
         setFormData({
             ...formData,
             project_id: projectId,
             assigned_to_id: undefined
         });
+
+        if (projectId) {
+            try {
+                const projectDetails = await api.getProject(projectId);
+                const selectedProject = projects?.find(p => p.id === projectId);
+                if (selectedProject) {
+                    selectedProject.team_members = projectDetails.team_members;
+                }
+            } catch (error) {
+                console.error('Error fetching project details:', error);
+            }
+        }
     };
 
     return (
@@ -244,7 +264,7 @@ export const Tasks = () => {
                                             <Person fontSize="small" sx={{ mr: 0.5 }} />
                                             <Typography variant="body2">
                                                 {
-                                                    users?.find((u) => u.id === task.assigned_to_id)
+                                                    employees?.find((u) => u.id === task.assigned_to_id)
                                                         ?.full_name
                                                 }
                                             </Typography>
@@ -329,19 +349,18 @@ export const Tasks = () => {
                                 <InputLabel>Priority</InputLabel>
                                 <Select
                                     value={formData.priority}
-                                    onChange={(e) =>
+                                    onChange={(e) => {
+                                        const value = e.target.value;
                                         setFormData({
                                             ...formData,
-                                            priority: e.target.value as TaskPriority,
-                                        })
-                                    }
+                                            priority: value as TaskPriority,
+                                        });
+                                    }}
                                     label="Priority"
                                 >
-                                    {Object.values(TaskPriority).map((priority) => (
-                                        <MenuItem key={priority} value={priority}>
-                                            {priority}
-                                        </MenuItem>
-                                    ))}
+                                    <MenuItem value={TaskPriority.LOW}>Low</MenuItem>
+                                    <MenuItem value={TaskPriority.MEDIUM}>Medium</MenuItem>
+                                    <MenuItem value={TaskPriority.HIGH}>High</MenuItem>
                                 </Select>
                             </FormControl>
                         </Grid>
@@ -379,12 +398,13 @@ export const Tasks = () => {
                             />
                         </Grid>
                         <Grid item xs={12} md={6}>
-                            <FormControl fullWidth margin="normal">
-                                <InputLabel>Project</InputLabel>
+                            <FormControl fullWidth margin="normal" error={!formData.project_id}>
+                                <InputLabel>Project *</InputLabel>
                                 <Select
                                     value={formData.project_id || ''}
                                     onChange={(e) => handleProjectChange(e.target.value as number)}
-                                    label="Project"
+                                    label="Project *"
+                                    required
                                 >
                                     <MenuItem value="">
                                         <em>Select a Project</em>
