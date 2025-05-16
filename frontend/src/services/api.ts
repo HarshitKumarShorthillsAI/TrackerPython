@@ -156,6 +156,6 @@ export const rejectTimeEntry = async (id: number, reason: string): Promise<TimeE
 };
 
 export const markTimeEntryBilled = async (id: number): Promise<TimeEntry> => {
-    const response = await api.put(`/time-entries/${id}/mark-billed`);
+    const response = await api.post(`/time-entries/${id}/mark-billed`);
     return response.data;
 }; 

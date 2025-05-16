@@ -21,7 +21,7 @@ import {
 import { Add, Edit, Delete, Person } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import { Task, TaskStatus, TaskPriority, Project, User } from '../types';
+import { Task, TaskStatus, TaskPriority, Project, User, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 
@@ -177,10 +177,21 @@ export const Tasks = () => {
         }
     };
 
-    const canManageTask = (task: Task) =>
-        user?.is_superuser ||
-        task.created_by_id === user?.id ||
-        task.assigned_to_id === user?.id;
+    const canManageTask = (task: Task) => {
+        // Superusers can manage all tasks
+        if (user?.is_superuser) {
+            return true;
+        }
+
+        // Managers can manage tasks in their projects
+        if (user?.role === UserRole.MANAGER) {
+            const project = projects?.find(p => p.id === task.project_id);
+            return project?.manager_id === user?.id;
+        }
+
+        // Regular employees cannot edit tasks
+        return false;
+    };
 
     const getAvailableTeamMembers = () => {
         return employees || [];
