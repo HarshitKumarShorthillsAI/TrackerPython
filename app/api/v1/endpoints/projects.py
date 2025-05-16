@@ -4,11 +4,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_active_user
 from app.models.user import User
 from app.models.project import Project
+from app.models.project_team_members import project_team_members
 from app.schemas.project import Project as ProjectSchema, ProjectCreate, ProjectUpdate
 from app.db.session import get_db
 from app import crud, models, schemas
 from app.models.project import ProjectStatus
 from app.models.user import UserRole
+from sqlalchemy import delete, insert
 
 router = APIRouter()
 
@@ -30,8 +32,8 @@ def read_projects(
             db=db, manager_id=current_user.id, skip=skip, limit=limit, status=status
         )
     else:
-        return crud.project.get_multi_by_owner(
-            db=db, owner_id=current_user.id, skip=skip, limit=limit, status=status
+        return crud.project.get_multi_by_team_member(
+            db=db, user_id=current_user.id, skip=skip, limit=limit, status=status
         )
 
 @router.post("/", response_model=schemas.Project)
@@ -75,6 +77,27 @@ def update_project(
         manager = crud.user.get(db=db, id=project_in.manager_id)
         if not manager:
             raise HTTPException(status_code=404, detail="Manager not found")
+    
+    # Handle team members
+    if project_in.team_members is not None:
+        # Remove all existing team members
+        db.execute(
+            delete(project_team_members).where(
+                project_team_members.c.project_id == project_id
+            )
+        )
+        # Add new team members
+        for user_id in project_in.team_members:
+            user = crud.user.get(db=db, id=user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            db.execute(
+                insert(project_team_members).values(
+                    project_id=project_id,
+                    user_id=user_id
+                )
+            )
+        db.commit()
     
     project = crud.project.update(db=db, db_obj=project, obj_in=project_in)
     return project

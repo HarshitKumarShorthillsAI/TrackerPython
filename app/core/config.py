@@ -18,9 +18,15 @@ class Settings(BaseSettings):
     # "http://localhost:8080", "http://local.dockertoolbox.tiangolo.com"]'
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://0.0.0.0:5173",
+        "http://localhost:5174",  # For when port 5173 is taken
+        "http://127.0.0.1:5174",
+        "http://0.0.0.0:5174",
         "http://10.99.20.55:5173",
-        "http://localhost:5174",
-        "http://10.99.20.55:5174"
+        "http://192.168.1.108:5173",
+        "http://10.99.20.55:5174",
+        "http://192.168.1.108:5174"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")

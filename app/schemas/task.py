@@ -8,7 +8,6 @@ class TaskBase(BaseModel):
     description: Optional[str] = None
     status: Optional[TaskStatus] = TaskStatus.TODO
     priority: Optional[TaskPriority] = TaskPriority.MEDIUM
-    is_active: Optional[bool] = True
     estimated_hours: Optional[float] = 0.0
     due_date: Optional[datetime] = None
     project_id: int

@@ -2,6 +2,7 @@ from typing import Any, Dict, Optional, Union, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from sqlalchemy.orm import joinedload
+from datetime import datetime
 
 from app.crud.base import CRUDBase
 from app.models.time_entry import TimeEntry, TimeEntryStatus
@@ -59,16 +60,64 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
         return query.offset(skip).limit(limit).all()
 
     def create_with_owner(
-        self, db: Session, *, obj_in: TimeEntryCreate, user_id: int, hourly_rate: float
+        self, db: Session, *, obj_in: Union[TimeEntryCreate, dict], user_id: int
     ) -> TimeEntry:
-        obj_in_data = obj_in.dict()
-        # Remove hourly_rate from obj_in_data if it exists to avoid duplicate
-        obj_in_data.pop('hourly_rate', None)
-        db_obj = TimeEntry(**obj_in_data, user_id=user_id, hourly_rate=hourly_rate)
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        # Convert input to dictionary if it's a Pydantic model
+        obj_data = obj_in if isinstance(obj_in, dict) else obj_in.model_dump()
+        
+        # Create time entry with user data
+        db_obj = TimeEntry(
+            **obj_data,
+            user_id=user_id,
+            status=TimeEntryStatus.DRAFT
+        )
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def update(
+        self, db: Session, *, db_obj: TimeEntry, obj_in: Union[TimeEntryUpdate, Dict[str, Any]]
+    ) -> TimeEntry:
+        if isinstance(obj_in, dict):
+            update_data = obj_in
+        else:
+            update_data = obj_in.dict(exclude_unset=True)
+            
+        # If end_time is being set, calculate duration and update status
+        if "end_time" in update_data:
+            end_time = datetime.fromisoformat(update_data["end_time"].replace("Z", "+00:00"))
+            start_time = db_obj.start_time
+            duration = (end_time - start_time).total_seconds() / 3600  # Convert to hours
+            
+            # Update the status to SUBMITTED when timer is stopped
+            update_data["status"] = TimeEntryStatus.SUBMITTED
+            
+        return super().update(db, db_obj=db_obj, obj_in=update_data)
+
+    def get_multi_by_owner(
+        self, db: Session, *, user_id: int, skip: int = 0, limit: int = 100
+    ) -> List[TimeEntry]:
+        return (
+            db.query(self.model)
+            .filter(TimeEntry.user_id == user_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    def get_multi_by_project(
+        self, db: Session, *, project_id: int, skip: int = 0, limit: int = 100
+    ) -> List[TimeEntry]:
+        return (
+            db.query(self.model)
+            .filter(TimeEntry.project_id == project_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     def submit(self, db: Session, *, time_entry: TimeEntry) -> TimeEntry:
         time_entry.status = TimeEntryStatus.SUBMITTED
@@ -136,4 +185,4 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
     def can_mark_billed(self, db: Session, user: User, time_entry: TimeEntry) -> bool:
         return user.is_superuser or user.role == UserRole.MANAGER
 
-time_entry = CRUDTimeEntry(TimeEntry) 
+crud_time_entry = CRUDTimeEntry(TimeEntry)

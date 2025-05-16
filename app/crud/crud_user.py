@@ -17,12 +17,10 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
     def create(self, db: Session, *, obj_in: UserCreate) -> User:
         db_obj = User(
             email=obj_in.email,
-            username=obj_in.username,
             hashed_password=get_password_hash(obj_in.password),
             full_name=obj_in.full_name,
             role=obj_in.role,
             hourly_rate=obj_in.hourly_rate,
-            quota_percent=obj_in.quota_percent,
             client_id=obj_in.client_id,
             is_superuser=obj_in.is_superuser,
             is_active=obj_in.is_active,

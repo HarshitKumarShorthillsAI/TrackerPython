@@ -57,12 +57,16 @@ def read_users(
     skip: int = 0,
     limit: int = 100,
     role: Optional[UserRole] = None,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Retrieve users. Can filter by role.
     """
-    users = crud.user.get_multi(db, skip=skip, limit=limit, role=role)
+    if current_user.is_superuser or current_user.role == UserRole.MANAGER:
+        users = crud.user.get_multi(db, skip=skip, limit=limit, role=role)
+    else:
+        # Regular users can only see active employees
+        users = crud.user.get_by_role(db, role=UserRole.EMPLOYEE)
     return users
 
 @router.post("/", response_model=UserSchema)
@@ -156,6 +160,17 @@ def read_managers(
     """
     return crud.user.get_by_role(db, role=UserRole.MANAGER)
 
+@router.get("/employees", response_model=List[UserSchema])
+def read_employees(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """
+    Retrieve all active employees.
+    """
+    employees = crud.user.get_by_role(db, role=UserRole.EMPLOYEE)
+    return [emp for emp in employees if emp.is_active]
+
 @router.get("/{user_id}", response_model=UserSchema)
 def read_user_by_id(
     user_id: int,
@@ -192,4 +207,29 @@ def update_user(
             detail="The user with this ID does not exist in the system",
         )
     user = crud.user.update(db, db_obj=user, obj_in=user_in)
+    return user
+
+@router.delete("/{user_id}", response_model=UserSchema)
+def delete_user(
+    *,
+    db: Session = Depends(get_db),
+    user_id: int,
+    current_user: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    Delete a user.
+    Only superusers can delete users.
+    """
+    user = crud.user.get(db, id=user_id)
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="The user with this ID does not exist in the system",
+        )
+    if user.id == current_user.id:
+        raise HTTPException(
+            status_code=400,
+            detail="Users cannot delete themselves",
+        )
+    user = crud.user.remove(db, id=user_id)
     return user 

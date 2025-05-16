@@ -1,57 +1,72 @@
-from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Body
+from typing import List, Optional, Any
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app import crud, models, schemas
 from app.api import deps
+from app.crud.crud_time_entry import crud_time_entry
+from app.crud.crud_task import task as crud_task
+from app.crud.crud_project import project as crud_project
 from app.models.time_entry import TimeEntryStatus
-from app.models.user import UserRole
+from app.models.user import User
+from app.schemas.time_entry import (
+    TimeEntry,
+    TimeEntryCreate,
+    TimeEntryUpdate
+)
 
 router = APIRouter()
 
-@router.get("/", response_model=List[schemas.TimeEntry])
-def read_time_entries(
+@router.get("/", response_model=List[TimeEntry])
+def get_time_entries(
     db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
     skip: int = 0,
     limit: int = 100,
     status: Optional[TimeEntryStatus] = None,
     project_id: Optional[int] = None,
     task_id: Optional[int] = None,
-    billable_only: bool = False,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
+    billable_only: bool = False
+) -> List[TimeEntry]:
     """
-    Retrieve time entries. Can filter by status, project, task, and billable flag.
+    Get time entries.
+    If user is manager or superuser, returns all time entries they have access to.
+    Otherwise, returns only the user's own time entries.
     """
-    if current_user.is_superuser:
-        return crud.time_entry.get_multi(
-            db, skip=skip, limit=limit, status=status,
-            project_id=project_id, task_id=task_id, billable_only=billable_only
-        )
-    elif current_user.role == UserRole.MANAGER:
-        return crud.time_entry.get_multi_by_manager(
-            db=db, manager_id=current_user.id, skip=skip, limit=limit,
-            status=status, project_id=project_id, task_id=task_id,
+    if current_user.is_superuser or current_user.role == "MANAGER":
+        time_entries = crud_time_entry.get_multi_by_manager(
+            db,
+            manager_id=current_user.id,
+            skip=skip,
+            limit=limit,
+            status=status,
+            project_id=project_id,
+            task_id=task_id,
             billable_only=billable_only
         )
     else:
-        return crud.time_entry.get_multi_by_user(
-            db=db, user_id=current_user.id, skip=skip, limit=limit,
-            status=status, project_id=project_id, task_id=task_id,
+        time_entries = crud_time_entry.get_multi_by_user(
+            db,
+            user_id=current_user.id,
+            skip=skip,
+            limit=limit,
+            status=status,
+            project_id=project_id,
+            task_id=task_id,
             billable_only=billable_only
         )
+    return time_entries
 
-@router.post("/", response_model=schemas.TimeEntry)
+@router.post("/", response_model=TimeEntry)
 def create_time_entry(
     *,
     db: Session = Depends(deps.get_db),
-    time_entry_in: schemas.TimeEntryCreate,
-    current_user: models.User = Depends(deps.get_current_active_user),
+    time_entry_in: TimeEntryCreate,
+    current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
     Create new time entry.
     """
-    task = crud.task.get(db=db, id=time_entry_in.task_id)
+    task = crud_task.get(db=db, id=time_entry_in.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -62,145 +77,142 @@ def create_time_entry(
             detail="New time entries must be created in draft status"
         )
     
-    # Set hourly rate from project team member rate or user rate
-    project_member = crud.project.get_team_member(
+    # Get project member's hourly rate or use user's default rate
+    project_member = crud_project.get_team_member(
         db=db,
         project_id=task.project_id,
         user_id=current_user.id
     )
-    hourly_rate = (
-        project_member["hourly_rate"] if project_member and project_member.get("hourly_rate")
-        else current_user.hourly_rate
+    hourly_rate = None
+    if project_member and project_member.get("hourly_rate"):
+        hourly_rate = project_member["hourly_rate"]
+    else:
+        hourly_rate = current_user.hourly_rate
+    
+    # Create time entry with project_id from task and hourly rate
+    time_entry_data = time_entry_in.model_dump()
+    time_entry_data["project_id"] = task.project_id
+    time_entry_data["hourly_rate"] = hourly_rate
+    
+    # Remove status as it will be set by create_with_owner
+    if "status" in time_entry_data:
+        del time_entry_data["status"]
+    
+    time_entry = crud_time_entry.create_with_owner(
+        db=db,
+        obj_in=time_entry_data,
+        user_id=current_user.id
     )
     
-    time_entry = crud.time_entry.create_with_owner(
-        db=db,
-        obj_in=time_entry_in,
-        user_id=current_user.id,
-        hourly_rate=hourly_rate
-    )
     return time_entry
 
-@router.put("/{time_entry_id}", response_model=schemas.TimeEntry)
+@router.put("/{time_entry_id}", response_model=TimeEntry)
 def update_time_entry(
     *,
     db: Session = Depends(deps.get_db),
     time_entry_id: int,
-    time_entry_in: schemas.TimeEntryUpdate,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Update time entry.
-    """
-    time_entry = crud.time_entry.get(db=db, id=time_entry_id)
+    time_entry_in: TimeEntryUpdate,
+    current_user: User = Depends(deps.get_current_user)
+) -> TimeEntry:
+    """Update a time entry."""
+    time_entry = crud_time_entry.get(db=db, id=time_entry_id)
     if not time_entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
-    if not crud.time_entry.can_update(db, current_user, time_entry):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
     
-    # Don't allow updates if entry is approved or billed
-    if time_entry.status in [TimeEntryStatus.APPROVED, TimeEntryStatus.BILLED]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot update time entry in {time_entry.status} status"
-        )
+    if not crud_time_entry.can_update(db, current_user, time_entry):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    time_entry = crud.time_entry.update(db=db, db_obj=time_entry, obj_in=time_entry_in)
+    try:
+        time_entry = crud_time_entry.update(db=db, db_obj=time_entry, obj_in=time_entry_in)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return time_entry
 
-@router.get("/{time_entry_id}", response_model=schemas.TimeEntry)
-def read_time_entry(
-    *,
-    db: Session = Depends(deps.get_db),
-    time_entry_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Get time entry by ID.
-    """
-    time_entry = crud.time_entry.get(db=db, id=time_entry_id)
-    if not time_entry:
-        raise HTTPException(status_code=404, detail="Time entry not found")
-    if not crud.time_entry.can_read(db, current_user, time_entry):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-    return time_entry
-
-@router.put("/{time_entry_id}/submit", response_model=schemas.TimeEntry)
+@router.post("/{time_entry_id}/submit", response_model=TimeEntry)
 def submit_time_entry(
     *,
     db: Session = Depends(deps.get_db),
     time_entry_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Submit time entry for approval.
-    """
-    time_entry = crud.time_entry.get(db=db, id=time_entry_id)
+    current_user: User = Depends(deps.get_current_user)
+) -> TimeEntry:
+    """Submit a time entry for approval."""
+    time_entry = crud_time_entry.get(db=db, id=time_entry_id)
     if not time_entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
-    if not crud.time_entry.can_submit(db, current_user, time_entry):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
     
-    time_entry = crud.time_entry.submit(db=db, time_entry=time_entry)
+    if not crud_time_entry.can_submit(db, current_user, time_entry):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    try:
+        time_entry = crud_time_entry.submit(db=db, time_entry=time_entry)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return time_entry
 
-@router.put("/{time_entry_id}/approve", response_model=schemas.TimeEntry)
+@router.post("/{time_entry_id}/approve", response_model=TimeEntry)
 def approve_time_entry(
     *,
     db: Session = Depends(deps.get_db),
     time_entry_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Approve time entry.
-    """
-    time_entry = crud.time_entry.get(db=db, id=time_entry_id)
+    current_user: User = Depends(deps.get_current_user)
+) -> TimeEntry:
+    """Approve a time entry."""
+    time_entry = crud_time_entry.get(db=db, id=time_entry_id)
     if not time_entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
-    if not crud.time_entry.can_approve(db, current_user, time_entry):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
     
-    time_entry = crud.time_entry.approve(db=db, time_entry=time_entry, approved_by=current_user)
+    if not crud_time_entry.can_approve(db, current_user, time_entry):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    try:
+        time_entry = crud_time_entry.approve(db=db, time_entry=time_entry, approved_by=current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return time_entry
 
-@router.put("/{time_entry_id}/reject", response_model=schemas.TimeEntry)
+@router.post("/{time_entry_id}/reject", response_model=TimeEntry)
 def reject_time_entry(
     *,
     db: Session = Depends(deps.get_db),
     time_entry_id: int,
-    rejection_reason: str = Body(...),
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Reject time entry.
-    """
-    time_entry = crud.time_entry.get(db=db, id=time_entry_id)
+    rejection_reason: str = Query(..., min_length=1),
+    current_user: User = Depends(deps.get_current_user)
+) -> TimeEntry:
+    """Reject a time entry."""
+    time_entry = crud_time_entry.get(db=db, id=time_entry_id)
     if not time_entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
-    if not crud.time_entry.can_approve(db, current_user, time_entry):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
     
-    time_entry = crud.time_entry.reject(
-        db=db, time_entry=time_entry,
-        rejection_reason=rejection_reason
-    )
+    if not crud_time_entry.can_approve(db, current_user, time_entry):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    try:
+        time_entry = crud_time_entry.reject(
+            db=db,
+            time_entry=time_entry,
+            rejection_reason=rejection_reason
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return time_entry
 
-@router.put("/{time_entry_id}/mark-billed", response_model=schemas.TimeEntry)
+@router.post("/{time_entry_id}/mark-billed", response_model=TimeEntry)
 def mark_time_entry_billed(
     *,
     db: Session = Depends(deps.get_db),
     time_entry_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Mark time entry as billed.
-    """
-    time_entry = crud.time_entry.get(db=db, id=time_entry_id)
+    current_user: User = Depends(deps.get_current_user)
+) -> TimeEntry:
+    """Mark a time entry as billed."""
+    time_entry = crud_time_entry.get(db=db, id=time_entry_id)
     if not time_entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
-    if not crud.time_entry.can_mark_billed(db, current_user, time_entry):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
     
-    time_entry = crud.time_entry.mark_billed(db=db, time_entry=time_entry)
+    if not crud_time_entry.can_mark_billed(db, current_user, time_entry):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    try:
+        time_entry = crud_time_entry.mark_billed(db=db, time_entry=time_entry)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return time_entry 

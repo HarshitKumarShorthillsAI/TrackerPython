@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional, Union, List
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from app.crud.base import CRUDBase
 from app.models.task import Task, TaskStatus, TaskPriority
@@ -15,7 +15,19 @@ class CRUDTask(CRUDBase[Task, TaskCreate, TaskUpdate]):
         status: Optional[TaskStatus] = None, priority: Optional[TaskPriority] = None,
         project_id: Optional[int] = None
     ) -> List[Task]:
-        query = db.query(self.model).filter(Task.assigned_to_id == user_id)
+        # Get projects where user is a team member
+        user_projects = db.query(project_team_members.c.project_id).filter(
+            project_team_members.c.user_id == user_id
+        ).subquery()
+
+        # Base query for tasks
+        query = db.query(self.model).filter(
+            or_(
+                Task.assigned_to_id == user_id,  # Tasks assigned to user
+                Task.project_id.in_(user_projects)  # Tasks from projects where user is a team member
+            )
+        )
+
         if status:
             query = query.filter(Task.status == status)
         if priority:

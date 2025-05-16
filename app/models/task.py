@@ -38,4 +38,4 @@ class Task(Base):
     project = relationship("Project", back_populates="tasks")
     created_by = relationship("User", foreign_keys=[created_by_id], back_populates="created_tasks")
     assigned_to = relationship("User", foreign_keys=[assigned_to_id], back_populates="assigned_tasks")
-    time_entries = relationship("TimeEntry", back_populates="task", cascade="all, delete-orphan") 
+    time_entries = relationship("TimeEntry", back_populates="task") 
