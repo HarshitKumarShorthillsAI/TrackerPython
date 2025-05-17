@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional, Union, List
 
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from app.core.security import get_password_hash, verify_password
 from app.crud.base import CRUDBase
@@ -62,5 +63,51 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
 
     def can_manage_users(self, user: User) -> bool:
         return user.is_superuser or user.role == UserRole.MANAGER
+
+    def remove(self, db: Session, *, id: int) -> User:
+        """Safely delete a user after checking and handling their relationships."""
+        user = db.query(User).get(id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Check for active time entries
+        if any(entry.status not in ['APPROVED', 'REJECTED', 'BILLED'] for entry in user.time_entries):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete user with pending time entries. Please process all time entries first."
+            )
+
+        # Check for managed projects
+        if user.managed_projects:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete user who is managing projects. Please reassign the projects first."
+            )
+
+        # Check for owned projects
+        if user.owned_projects:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete user who owns projects. Please reassign project ownership first."
+            )
+
+        # Remove user from project teams
+        user.project_teams = []
+
+        # Unassign tasks
+        for task in user.assigned_tasks:
+            task.assigned_to_id = None
+
+        # Mark tasks as system-created
+        for task in user.created_tasks:
+            task.created_by_id = None
+
+        # Remove approver from time entries
+        for entry in user.approved_time_entries:
+            entry.approved_by_id = None
+
+        db.delete(user)
+        db.commit()
+        return user
 
 user = CRUDUser(User) 
