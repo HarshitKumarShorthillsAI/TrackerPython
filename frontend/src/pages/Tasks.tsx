@@ -33,7 +33,6 @@ interface TaskFormData {
     estimated_hours: number;
     due_date: string;
     project_id: number;
-    assigned_to_id?: number;
 }
 
 export const Tasks = () => {
@@ -47,7 +46,6 @@ export const Tasks = () => {
         estimated_hours: 0,
         due_date: new Date().toISOString().split('T')[0],
         project_id: 0,
-        assigned_to_id: undefined,
     });
 
     const queryClient = useQueryClient();
@@ -99,7 +97,6 @@ export const Tasks = () => {
                 estimated_hours: task.estimated_hours,
                 due_date: task.due_date?.split('T')[0] || new Date().toISOString().split('T')[0],
                 project_id: task.project_id,
-                assigned_to_id: task.assigned_to_id,
             });
         } else {
             setEditingTask(null);
@@ -111,7 +108,6 @@ export const Tasks = () => {
                 estimated_hours: 0,
                 due_date: new Date().toISOString().split('T')[0],
                 project_id: 0,
-                assigned_to_id: undefined,
             });
         }
         setDialogOpen(true);
@@ -136,7 +132,6 @@ export const Tasks = () => {
             estimated_hours: formData.estimated_hours,
             due_date: formData.due_date ? new Date(formData.due_date).toISOString() : undefined,
             project_id: formData.project_id,
-            assigned_to_id: formData.assigned_to_id || undefined
         };
 
         if (editingTask) {
@@ -201,7 +196,6 @@ export const Tasks = () => {
         setFormData({
             ...formData,
             project_id: projectId,
-            assigned_to_id: undefined
         });
 
         if (projectId) {
@@ -221,7 +215,7 @@ export const Tasks = () => {
         <Box>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
                 <Typography variant="h4">Tasks</Typography>
-                {isManager() && (
+                {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
                     <Button
                         variant="contained"
                         color="primary"
@@ -268,7 +262,7 @@ export const Tasks = () => {
                                 </Box>
                                 <Box display="flex" justifyContent="space-between" mb={2}>
                                     <Typography variant="body2">
-                                        Due: {format(new Date(task.due_date), 'MMM dd, yyyy')}
+                                        Due: {task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No due date'}
                                     </Typography>
                                     {task.assigned_to_id && (
                                         <Box display="flex" alignItems="center">
@@ -309,7 +303,7 @@ export const Tasks = () => {
             <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
                 <DialogTitle>{editingTask ? 'Edit Task' : 'Create New Task'}</DialogTitle>
                 <DialogContent>
-                    <Grid container spacing={2}>
+                    <Grid container spacing={2} sx={{ mt: 1 }}>
                         <Grid item xs={12}>
                             <TextField
                                 fullWidth
@@ -318,7 +312,7 @@ export const Tasks = () => {
                                 onChange={(e) =>
                                     setFormData({ ...formData, title: e.target.value })
                                 }
-                                margin="normal"
+                                required
                             />
                         </Grid>
                         <Grid item xs={12}>
@@ -331,11 +325,10 @@ export const Tasks = () => {
                                 }
                                 multiline
                                 rows={4}
-                                margin="normal"
                             />
                         </Grid>
                         <Grid item xs={12} md={6}>
-                            <FormControl fullWidth margin="normal">
+                            <FormControl fullWidth>
                                 <InputLabel>Status</InputLabel>
                                 <Select
                                     value={formData.status}
@@ -356,22 +349,23 @@ export const Tasks = () => {
                             </FormControl>
                         </Grid>
                         <Grid item xs={12} md={6}>
-                            <FormControl fullWidth margin="normal">
+                            <FormControl fullWidth>
                                 <InputLabel>Priority</InputLabel>
                                 <Select
                                     value={formData.priority}
-                                    onChange={(e) => {
-                                        const value = e.target.value;
+                                    onChange={(e) =>
                                         setFormData({
                                             ...formData,
-                                            priority: value as TaskPriority,
-                                        });
-                                    }}
+                                            priority: e.target.value as TaskPriority,
+                                        })
+                                    }
                                     label="Priority"
                                 >
-                                    <MenuItem value={TaskPriority.LOW}>Low</MenuItem>
-                                    <MenuItem value={TaskPriority.MEDIUM}>Medium</MenuItem>
-                                    <MenuItem value={TaskPriority.HIGH}>High</MenuItem>
+                                    {Object.values(TaskPriority).map((priority) => (
+                                        <MenuItem key={priority} value={priority}>
+                                            {priority}
+                                        </MenuItem>
+                                    ))}
                                 </Select>
                             </FormControl>
                         </Grid>
@@ -384,70 +378,30 @@ export const Tasks = () => {
                                 onChange={(e) =>
                                     setFormData({
                                         ...formData,
-                                        estimated_hours: Number(e.target.value),
+                                        estimated_hours: parseFloat(e.target.value),
                                     })
                                 }
-                                margin="normal"
                             />
                         </Grid>
                         <Grid item xs={12} md={6}>
-                            <TextField
-                                fullWidth
-                                type="date"
-                                label="Due Date"
-                                value={formData.due_date}
-                                onChange={(e) =>
-                                    setFormData({
-                                        ...formData,
-                                        due_date: e.target.value,
-                                    })
-                                }
-                                margin="normal"
-                                InputLabelProps={{
-                                    shrink: true,
-                                }}
-                            />
-                        </Grid>
-                        <Grid item xs={12} md={6}>
-                            <FormControl fullWidth margin="normal" error={!formData.project_id}>
-                                <InputLabel>Project *</InputLabel>
+                            <FormControl fullWidth>
+                                <InputLabel>Project</InputLabel>
                                 <Select
                                     value={formData.project_id || ''}
-                                    onChange={(e) => handleProjectChange(e.target.value as number)}
-                                    label="Project *"
-                                    required
+                                    onChange={(e) =>
+                                        setFormData({
+                                            ...formData,
+                                            project_id: e.target.value as number,
+                                        })
+                                    }
+                                    label="Project"
                                 >
                                     <MenuItem value="">
-                                        <em>Select a Project</em>
+                                        <em>Select a project</em>
                                     </MenuItem>
                                     {projects?.map((project) => (
                                         <MenuItem key={project.id} value={project.id}>
                                             {project.name}
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                        </Grid>
-                        <Grid item xs={12} md={6}>
-                            <FormControl fullWidth margin="normal">
-                                <InputLabel>Assigned To</InputLabel>
-                                <Select
-                                    value={formData.assigned_to_id || ''}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            assigned_to_id: e.target.value as number,
-                                        })
-                                    }
-                                    label="Assigned To"
-                                    disabled={!formData.project_id}
-                                >
-                                    <MenuItem value="">
-                                        <em>None</em>
-                                    </MenuItem>
-                                    {getAvailableTeamMembers().map((user) => (
-                                        <MenuItem key={user.id} value={user.id}>
-                                            {user.full_name}
                                         </MenuItem>
                                     ))}
                                 </Select>

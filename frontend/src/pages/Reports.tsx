@@ -10,7 +10,6 @@ import {
     InputLabel,
     Select,
     MenuItem,
-    TextField,
     Table,
     TableBody,
     TableCell,
@@ -18,6 +17,8 @@ import {
     TableHead,
     TableRow,
     Paper,
+    Alert,
+    CircularProgress,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -27,6 +28,8 @@ import * as api from '../services/api';
 import { format } from 'date-fns';
 import { Download } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { useSnackbar } from 'notistack';
+import { TimeEntry } from '../types';
 
 export const Reports = () => {
     const [selectedUser, setSelectedUser] = useState<number | ''>('');
@@ -34,6 +37,7 @@ export const Reports = () => {
     const [startDate, setStartDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
     const { user, isManager } = useAuth();
+    const { enqueueSnackbar } = useSnackbar();
 
     // Fetch data
     const { data: users } = useQuery({
@@ -47,23 +51,24 @@ export const Reports = () => {
         queryFn: api.getProjects
     });
 
-    const { data: timeEntries } = useQuery({
+    const { data: timeEntries, isLoading } = useQuery({
         queryKey: ['timeEntries', selectedUser, selectedProject, startDate, endDate],
         queryFn: () => api.getTimeEntries(
-            selectedUser ? Number(selectedUser) : undefined,
+            selectedUser ? Number(selectedUser) : user?.id,
             selectedProject ? Number(selectedProject) : undefined,
-            startDate?.toISOString(),
-            endDate?.toISOString()
-        )
+            startDate ? format(startDate, 'yyyy-MM-dd') : undefined,
+            endDate ? format(endDate, 'yyyy-MM-dd') : undefined
+        ),
+        enabled: !!(startDate && endDate) // Only fetch when dates are selected
     });
 
     // Calculate summary statistics
     const calculateSummary = () => {
         if (!timeEntries) return { totalHours: 0, totalProjects: 0, totalTasks: 0 };
 
-        const uniqueProjects = new Set(timeEntries.map(entry => entry.project_id));
-        const uniqueTasks = new Set(timeEntries.map(entry => entry.task_id));
-        const totalHours = timeEntries.reduce((sum, entry) => {
+        const uniqueProjects = new Set(timeEntries.map((entry: TimeEntry) => entry.project_id));
+        const uniqueTasks = new Set(timeEntries.map((entry: TimeEntry) => entry.task_id));
+        const totalHours = timeEntries.reduce((sum: number, entry: TimeEntry) => {
             if (!entry.end_time) return sum;
             const start = new Date(entry.start_time);
             const end = new Date(entry.end_time);
@@ -79,14 +84,17 @@ export const Reports = () => {
     };
 
     const handleGenerateReport = async () => {
-        if (!timeEntries || !startDate || !endDate) return;
+        if (!startDate || !endDate) {
+            enqueueSnackbar('Please select both start and end dates', { variant: 'error' });
+            return;
+        }
 
         try {
             const response = await api.generateReport({
                 user_id: selectedUser ? Number(selectedUser) : user?.id,
                 project_id: selectedProject ? Number(selectedProject) : undefined,
-                start_date: startDate.toISOString(),
-                end_date: endDate.toISOString()
+                start_date: format(startDate, 'yyyy-MM-dd'),
+                end_date: format(endDate, 'yyyy-MM-dd')
             });
 
             // Create a blob from the PDF data and download it
@@ -98,30 +106,28 @@ export const Reports = () => {
             document.body.appendChild(link);
             link.click();
             link.remove();
-            window.URL.revokeObjectURL(url); // Clean up the URL object
+            window.URL.revokeObjectURL(url);
+            enqueueSnackbar('Report generated successfully', { variant: 'success' });
         } catch (error: any) {
             console.error('Error generating report:', error);
-            let errorMessage = 'An error occurred while generating the report.';
+            let errorMessage = 'Failed to generate report';
             
-            if (error.response) {
-                // The request was made and the server responded with a status code
-                // that falls out of the range of 2xx
-                if (error.response.status === 403) {
-                    errorMessage = 'You do not have permission to generate this report.';
-                } else if (error.response.status === 404) {
-                    errorMessage = 'No data found for the selected criteria.';
-                } else if (error.response.data && typeof error.response.data === 'string') {
-                    errorMessage = error.response.data;
+            // Try to extract error message from response
+            if (error.response?.data) {
+                if (error.response.data instanceof Blob) {
+                    try {
+                        const text = await error.response.data.text();
+                        const errorData = JSON.parse(text);
+                        errorMessage = errorData.detail || errorData.message || errorMessage;
+                    } catch (e) {
+                        console.error('Error parsing error response:', e);
+                    }
+                } else {
+                    errorMessage = error.response.data.detail || error.response.data.message || errorMessage;
                 }
-            } else if (error.request) {
-                // The request was made but no response was received
-                errorMessage = 'Unable to connect to the server. Please check your internet connection.';
             }
             
-            // Show error using your preferred notification system
-            // For now, we'll use console.error
-            console.error(errorMessage);
-            // TODO: Add proper error notification UI component
+            enqueueSnackbar(errorMessage, { variant: 'error' });
         }
     };
 
@@ -139,13 +145,13 @@ export const Reports = () => {
                         {isManager() && (
                             <Grid item xs={12} md={3}>
                                 <FormControl fullWidth>
-                                    <InputLabel>User</InputLabel>
+                                    <InputLabel>Employee</InputLabel>
                                     <Select
                                         value={selectedUser}
                                         onChange={(e) => setSelectedUser(e.target.value as number)}
-                                        label="User"
+                                        label="Employee"
                                     >
-                                        <MenuItem value="">All Users</MenuItem>
+                                        <MenuItem value="">All Employees</MenuItem>
                                         {users?.map((user) => (
                                             <MenuItem key={user.id} value={user.id}>
                                                 {user.full_name}
@@ -196,79 +202,94 @@ export const Reports = () => {
                 </CardContent>
             </Card>
 
-            <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} md={4}>
-                    <Card>
-                        <CardContent>
-                            <Typography variant="h6" gutterBottom>Total Hours</Typography>
-                            <Typography variant="h4">{summary.totalHours}</Typography>
-                        </CardContent>
-                    </Card>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                    <Card>
-                        <CardContent>
-                            <Typography variant="h6" gutterBottom>Projects Worked On</Typography>
-                            <Typography variant="h4">{summary.totalProjects}</Typography>
-                        </CardContent>
-                    </Card>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                    <Card>
-                        <CardContent>
-                            <Typography variant="h6" gutterBottom>Total Tasks</Typography>
-                            <Typography variant="h4">{summary.totalTasks}</Typography>
-                        </CardContent>
-                    </Card>
-                </Grid>
-            </Grid>
+            {!startDate || !endDate ? (
+                <Alert severity="info" sx={{ mb: 4 }}>
+                    Please select both start and end dates to view the report
+                </Alert>
+            ) : (
+                <>
+                    <Grid container spacing={3} sx={{ mb: 4 }}>
+                        <Grid item xs={12} md={4}>
+                            <Card>
+                                <CardContent>
+                                    <Typography variant="h6" gutterBottom>Total Hours</Typography>
+                                    <Typography variant="h4">{summary.totalHours}</Typography>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                            <Card>
+                                <CardContent>
+                                    <Typography variant="h6" gutterBottom>Projects Worked On</Typography>
+                                    <Typography variant="h4">{summary.totalProjects}</Typography>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                            <Card>
+                                <CardContent>
+                                    <Typography variant="h6" gutterBottom>Total Tasks</Typography>
+                                    <Typography variant="h4">{summary.totalTasks}</Typography>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+                    </Grid>
 
-            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                <Button
-                    variant="contained"
-                    startIcon={<Download />}
-                    onClick={handleGenerateReport}
-                    disabled={!startDate || !endDate}
-                >
-                    Download Report
-                </Button>
-            </Box>
+                    <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="h5">Time Entries</Typography>
+                        <Button
+                            variant="contained"
+                            startIcon={<Download />}
+                            onClick={handleGenerateReport}
+                            disabled={!startDate || !endDate}
+                        >
+                            Download Report
+                        </Button>
+                    </Box>
 
-            <TableContainer component={Paper}>
-                <Table>
-                    <TableHead>
-                        <TableRow>
-                            <TableCell>Date</TableCell>
-                            <TableCell>Project</TableCell>
-                            <TableCell>Task</TableCell>
-                            <TableCell>Description</TableCell>
-                            <TableCell>Hours</TableCell>
-                            <TableCell>Status</TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {timeEntries?.map((entry) => {
-                            const project = projects?.find(p => p.id === entry.project_id);
-                            const hours = entry.end_time
-                                ? (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / (1000 * 60 * 60)
-                                : 0;
+                    {isLoading ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                            <CircularProgress />
+                        </Box>
+                    ) : timeEntries?.length === 0 ? (
+                        <Alert severity="info">No time entries found for the selected criteria</Alert>
+                    ) : (
+                        <TableContainer component={Paper}>
+                            <Table>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>Date</TableCell>
+                                        <TableCell>Project</TableCell>
+                                        <TableCell>Description</TableCell>
+                                        <TableCell>Hours</TableCell>
+                                        <TableCell>Status</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {timeEntries?.map((entry: TimeEntry) => {
+                                        const project = projects?.find(p => p.id === entry.project_id);
+                                        const hours = entry.end_time
+                                            ? (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / (1000 * 60 * 60)
+                                            : 0;
 
-                            return (
-                                <TableRow key={entry.id}>
-                                    <TableCell>
-                                        {format(new Date(entry.start_time), 'MMM dd, yyyy')}
-                                    </TableCell>
-                                    <TableCell>{project?.name}</TableCell>
-                                    <TableCell>{entry.task?.title}</TableCell>
-                                    <TableCell>{entry.description}</TableCell>
-                                    <TableCell>{Math.round(hours * 100) / 100}</TableCell>
-                                    <TableCell>{entry.status}</TableCell>
-                                </TableRow>
-                            );
-                        })}
-                    </TableBody>
-                </Table>
-            </TableContainer>
+                                        return (
+                                            <TableRow key={entry.id}>
+                                                <TableCell>
+                                                    {format(new Date(entry.start_time), 'MMM dd, yyyy')}
+                                                </TableCell>
+                                                <TableCell>{project?.name || 'Unknown Project'}</TableCell>
+                                                <TableCell>{entry.description || '-'}</TableCell>
+                                                <TableCell>{Math.round(hours * 100) / 100}</TableCell>
+                                                <TableCell>{entry.status}</TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+                </>
+            )}
         </Box>
     );
 }; 

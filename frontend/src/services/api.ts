@@ -121,19 +121,30 @@ export const deleteTask = async (id: number): Promise<void> => {
 
 // Time Entries
 export const getTimeEntries = async (
-    userId?: number,
-    projectId?: number,
-    startDate?: string,
-    endDate?: string
-): Promise<TimeEntry[]> => {
-    const params = new URLSearchParams();
-    if (userId) params.append('user_id', userId.toString());
-    if (projectId) params.append('project_id', projectId.toString());
-    if (startDate) params.append('start_date', startDate);
-    if (endDate) params.append('end_date', endDate);
-    
-    const response = await api.get(`/time-entries?${params.toString()}`);
-    return response.data;
+    user_id?: number,
+    project_id?: number,
+    start_date?: string,
+    end_date?: string
+) => {
+    try {
+        let url = '/time-entries/';
+        const params = new URLSearchParams();
+        
+        if (user_id) params.append('user_id', user_id.toString());
+        if (project_id) params.append('project_id', project_id.toString());
+        if (start_date) params.append('start_date', start_date);
+        if (end_date) params.append('end_date', end_date);
+        
+        if (params.toString()) {
+            url += `?${params.toString()}`;
+        }
+        
+        const response = await api.get(url);
+        return response.data;
+    } catch (error: any) {
+        console.error('Error fetching time entries:', error);
+        throw new Error(error.response?.data?.detail || 'Failed to fetch time entries');
+    }
 };
 
 export const createTimeEntry = async (data: Partial<TimeEntry>): Promise<TimeEntry> => {
@@ -198,14 +209,14 @@ export const generateReport = async (params: ReportParams) => {
     } catch (error: any) {
         // If the error response is a blob, try to read it
         if (error.response?.data instanceof Blob) {
-            const text = await error.response.data.text();
             try {
+                const text = await error.response.data.text();
                 const errorData = JSON.parse(text);
-                throw new Error(errorData.detail || 'Failed to generate report');
+                throw new Error(errorData.detail || errorData.message || 'Failed to generate report');
             } catch (e) {
-                throw new Error('Failed to generate report');
+                throw new Error('Failed to generate report: Invalid server response');
             }
         }
-        throw error;
+        throw new Error(error.response?.data?.detail || error.message || 'Failed to generate report');
     }
 }; 

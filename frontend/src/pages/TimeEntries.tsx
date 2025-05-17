@@ -55,6 +55,41 @@ import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useSnackbar } from 'notistack';
 
+// Utility functions
+const calculateDuration = (entry: TimeEntry): string => {
+    if (!entry.end_time) return '00:00';
+    const start = parseISO(entry.start_time);
+    const end = parseISO(entry.end_time);
+    const hours = differenceInHours(end, start);
+    const minutes = differenceInMinutes(end, start) % 60;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+};
+
+const calculateCost = (entry: TimeEntry): string => {
+    if (!entry.end_time) return '0.00';
+    const start = parseISO(entry.start_time);
+    const end = parseISO(entry.end_time);
+    const hours = differenceInMinutes(end, start) / 60;
+    return (hours * entry.hourly_rate).toFixed(2);
+};
+
+const getStatusChipColor = (status: TimeEntryStatus) => {
+    switch (status) {
+        case TimeEntryStatus.DRAFT:
+            return 'default';
+        case TimeEntryStatus.SUBMITTED:
+            return 'primary';
+        case TimeEntryStatus.APPROVED:
+            return 'success';
+        case TimeEntryStatus.REJECTED:
+            return 'error';
+        case TimeEntryStatus.BILLED:
+            return 'secondary';
+        default:
+            return 'default';
+    }
+};
+
 interface PendingApprovalsProps {
     timeEntries: TimeEntry[];
     projects: Project[];
@@ -199,8 +234,8 @@ export const TimeEntries = () => {
     });
 
     const { data: timeEntries, isLoading: isLoadingTimeEntries } = useQuery({
-        queryKey: ['timeEntries', statusFilter],
-        queryFn: () => api.getTimeEntries(statusFilter !== 'ALL' ? statusFilter : undefined)
+        queryKey: ['timeEntries'],
+        queryFn: () => api.getTimeEntries(undefined)
     });
 
     // Query for employees data
@@ -219,17 +254,33 @@ export const TimeEntries = () => {
         return projects;
     }, [projects]);
 
-    // Get available tasks based on selected project
-    const availableTasks = tasks?.filter(task => {
-        if (!selectedProject) return false;
-        return task.project_id === selectedProject;
-    }) || [];
+    // Get available tasks based on selected project and user assignments
+    const availableTasks = React.useMemo(() => {
+        if (!tasks || !selectedProject || !user) return [];
+        
+        return tasks.filter(task => {
+            // Task must belong to the selected project
+            if (task.project_id !== selectedProject) return false;
+
+            // Superusers can see all tasks in the project
+            if (user.is_superuser) return true;
+
+            // Managers can see all tasks in their projects
+            if (user.role === UserRole.MANAGER) {
+                const project = projects?.find(p => p.id === task.project_id);
+                if (project?.manager_id === user.id) return true;
+            }
+
+            // Regular users can only see tasks assigned to them
+            return task.assigned_to_id === user.id;
+        });
+    }, [tasks, selectedProject, user, projects]);
 
     // Filter time entries based on user role and status
     const filteredTimeEntries = React.useMemo(() => {
         if (!timeEntries || !user || !projects) return [];
 
-        return timeEntries.filter(entry => {
+        return timeEntries.filter((entry: TimeEntry) => {
             // Apply status filter first
             if (statusFilter !== 'ALL' && entry.status !== statusFilter) {
                 return false;
@@ -257,7 +308,7 @@ export const TimeEntries = () => {
     const pendingTimeEntries = React.useMemo(() => {
         if (!timeEntries || !user || !projects) return [];
 
-        return timeEntries.filter(entry => {
+        return timeEntries.filter((entry: TimeEntry) => {
             // Only show SUBMITTED entries
             if (entry.status !== TimeEntryStatus.SUBMITTED) return false;
 
@@ -327,8 +378,9 @@ export const TimeEntries = () => {
             enqueueSnackbar('Time entry submitted successfully', { variant: 'success' });
         },
         onError: (error: any) => {
-            setError(error.message || 'Failed to submit time entry');
-            enqueueSnackbar('Failed to submit time entry', { variant: 'error' });
+            console.error('Error submitting time entry:', error);
+            const errorMessage = error.response?.data?.detail || error.message || 'Failed to submit time entry';
+            enqueueSnackbar(errorMessage, { variant: 'error' });
         }
     });
 
@@ -506,11 +558,20 @@ export const TimeEntries = () => {
         }
     };
 
-    const handleSubmitTimeEntry = async (timeEntry: TimeEntry) => {
+    const handleSubmitTimeEntry = async (id: number) => {
+        if (!id) {
+            enqueueSnackbar('Invalid time entry ID', { variant: 'error' });
+            return;
+        }
+
         try {
-            await submitMutation.mutateAsync(timeEntry.id);
+            await submitMutation.mutateAsync(id);
+            enqueueSnackbar('Time entry submitted successfully', { variant: 'success' });
+            queryClient.invalidateQueries({ queryKey: ['timeEntries'] });
         } catch (error: any) {
-            setError(error.message || 'Failed to submit time entry');
+            console.error('Error submitting time entry:', error);
+            const errorMessage = error.response?.data?.detail || error.message || 'Failed to submit time entry';
+            enqueueSnackbar(errorMessage, { variant: 'error' });
         }
     };
 
@@ -553,23 +614,6 @@ export const TimeEntries = () => {
     const canManageTimeEntries = user?.is_superuser || user?.role === UserRole.MANAGER;
 
     const canApproveTimeEntries = user?.is_superuser || user?.role === UserRole.MANAGER;
-
-    const getStatusChipColor = (status: TimeEntryStatus) => {
-        switch (status) {
-            case TimeEntryStatus.DRAFT:
-                return 'default';
-            case TimeEntryStatus.SUBMITTED:
-                return 'primary';
-            case TimeEntryStatus.APPROVED:
-                return 'success';
-            case TimeEntryStatus.REJECTED:
-                return 'error';
-            case TimeEntryStatus.BILLED:
-                return 'secondary';
-            default:
-                return 'default';
-        }
-    };
 
     const handleOpenRejectDialog = (timeEntry: TimeEntry) => {
         setSelectedTimeEntry(timeEntry);
@@ -850,7 +894,7 @@ export const TimeEntries = () => {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {filteredTimeEntries?.map((entry) => (
+                        {filteredTimeEntries?.map((entry: TimeEntry) => (
                             <TableRow key={entry.id}>
                                 {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
                                     <TableCell>
@@ -863,7 +907,7 @@ export const TimeEntries = () => {
                                 <TableCell>
                                     {tasks?.find(t => t.id === entry.task_id)?.title}
                                 </TableCell>
-                                <TableCell>{entry.description}</TableCell>
+                                <TableCell>{entry.description || '-'}</TableCell>
                                 <TableCell>
                                     {format(parseISO(entry.start_time), 'yyyy-MM-dd HH:mm')}
                                 </TableCell>
@@ -891,7 +935,11 @@ export const TimeEntries = () => {
                                                 <IconButton onClick={() => handleEditTimeEntry(entry)} size="small">
                                                     <Edit />
                                                 </IconButton>
-                                                <IconButton onClick={() => handleSubmitTimeEntry(entry)} size="small">
+                                                <IconButton
+                                                    size="small"
+                                                    color="primary"
+                                                    onClick={() => handleSubmitTimeEntry(entry.id)}
+                                                >
                                                     <Send />
                                                 </IconButton>
                                             </>
@@ -1014,23 +1062,6 @@ export const TimeEntries = () => {
             />
         </Container>
     );
-};
-
-const calculateCost = (timeEntry: TimeEntry) => {
-    if (!timeEntry.end_time) return 0;
-    const start = parseISO(timeEntry.start_time);
-    const end = parseISO(timeEntry.end_time);
-    const hours = differenceInMinutes(end, start) / 60;
-    return hours * timeEntry.hourly_rate;
-};
-
-const calculateDuration = (timeEntry: TimeEntry) => {
-    if (!timeEntry.end_time) return 'In Progress';
-    const start = parseISO(timeEntry.start_time);
-    const end = parseISO(timeEntry.end_time);
-    const hours = differenceInHours(end, start);
-    const minutes = differenceInMinutes(end, start) % 60;
-    return `${hours}h ${minutes}m`;
 };
 
 interface RejectDialogProps {
