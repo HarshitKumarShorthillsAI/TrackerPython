@@ -524,17 +524,21 @@ export const TimeEntries = () => {
 
     const handleRejectTimeEntry = async () => {
         if (!selectedTimeEntry || !rejectionReason.trim()) {
-            setError('Please provide a rejection reason');
+            enqueueSnackbar('Please provide a rejection reason', { variant: 'error' });
             return;
         }
-
+        
         try {
             await rejectMutation.mutateAsync({
                 id: selectedTimeEntry.id,
                 reason: rejectionReason.trim()
             });
+            handleCloseRejectDialog();
+            enqueueSnackbar('Time entry rejected successfully', { variant: 'success' });
         } catch (error: any) {
-            setError(error.message || 'Failed to reject time entry');
+            console.error('Error rejecting time entry:', error);
+            const errorMessage = error.response?.data?.detail || 'Failed to reject time entry';
+            enqueueSnackbar(errorMessage, { variant: 'error' });
         }
     };
 
@@ -576,19 +580,6 @@ export const TimeEntries = () => {
         setSelectedTimeEntry(null);
         setRejectionReason('');
         setRejectDialogOpen(false);
-    };
-
-    const handleReject = async () => {
-        if (!selectedTimeEntry || !rejectionReason.trim()) return;
-        try {
-            await rejectMutation.mutateAsync({
-                id: selectedTimeEntry.id,
-                reason: rejectionReason.trim()
-            });
-            handleCloseRejectDialog();
-        } catch (error) {
-            console.error('Error rejecting time entry:', error);
-        }
     };
 
     // Add a filter toolbar above the time entries table
@@ -1019,7 +1010,7 @@ export const TimeEntries = () => {
                 onClose={handleCloseRejectDialog}
                 rejectionReason={rejectionReason}
                 onReasonChange={setRejectionReason}
-                onReject={handleReject}
+                onReject={handleRejectTimeEntry}
             />
         </Container>
     );

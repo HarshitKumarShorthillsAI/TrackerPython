@@ -120,9 +120,19 @@ export const deleteTask = async (id: number): Promise<void> => {
 };
 
 // Time Entries
-export const getTimeEntries = async (status?: string): Promise<TimeEntry[]> => {
-    const params = status ? { status } : {};
-    const response = await api.get('/time-entries', { params });
+export const getTimeEntries = async (
+    userId?: number,
+    projectId?: number,
+    startDate?: string,
+    endDate?: string
+): Promise<TimeEntry[]> => {
+    const params = new URLSearchParams();
+    if (userId) params.append('user_id', userId.toString());
+    if (projectId) params.append('project_id', projectId.toString());
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    
+    const response = await api.get(`/time-entries?${params.toString()}`);
     return response.data;
 };
 
@@ -151,11 +161,51 @@ export const approveTimeEntry = async (id: number): Promise<TimeEntry> => {
 };
 
 export const rejectTimeEntry = async (id: number, reason: string): Promise<TimeEntry> => {
-    const response = await api.put(`/time-entries/${id}/reject`, { rejection_reason: reason });
+    const response = await api.post(`/time-entries/${id}/reject`, null, {
+        params: { rejection_reason: reason }
+    });
     return response.data;
 };
 
 export const markTimeEntryBilled = async (id: number): Promise<TimeEntry> => {
     const response = await api.post(`/time-entries/${id}/mark-billed`);
     return response.data;
+};
+
+export interface ReportParams {
+    user_id?: number;
+    project_id?: number;
+    start_date: string;
+    end_date: string;
+}
+
+export const generateReport = async (params: ReportParams) => {
+    try {
+        const response = await api.post('/reports/generate', params, {
+            responseType: 'blob',
+            headers: {
+                'Accept': 'application/pdf',
+                'Content-Type': 'application/json'
+            }
+        });
+
+        // Check if the response is actually a PDF
+        if (response.headers['content-type'] !== 'application/pdf') {
+            throw new Error('Invalid response type received from server');
+        }
+
+        return response;
+    } catch (error: any) {
+        // If the error response is a blob, try to read it
+        if (error.response?.data instanceof Blob) {
+            const text = await error.response.data.text();
+            try {
+                const errorData = JSON.parse(text);
+                throw new Error(errorData.detail || 'Failed to generate report');
+            } catch (e) {
+                throw new Error('Failed to generate report');
+            }
+        }
+        throw error;
+    }
 }; 

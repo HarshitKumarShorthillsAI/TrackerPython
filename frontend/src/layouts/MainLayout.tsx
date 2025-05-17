@@ -1,12 +1,12 @@
 import React from 'react';
 import { AppBar, Box, CssBaseline, Drawer, IconButton, List, ListItem, ListItemIcon, ListItemText, Toolbar, Typography } from '@mui/material';
-import { Menu as MenuIcon, Timer, Assignment, FolderOpen, People, Logout } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { Menu as MenuIcon, Timer, Assignment, FolderOpen, People, Logout, Assessment } from '@mui/icons-material';
+import { useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 const drawerWidth = 240;
 
-export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const MainLayout = () => {
     const [mobileOpen, setMobileOpen] = React.useState(false);
     const { user, logout, isAdmin } = useAuth();
     const navigate = useNavigate();
@@ -15,6 +15,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         { text: 'Time Entries', icon: <Timer />, path: '/time-entries' },
         { text: 'Tasks', icon: <Assignment />, path: '/tasks' },
         { text: 'Projects', icon: <FolderOpen />, path: '/projects' },
+        { text: 'Reports', icon: <Assessment />, path: '/reports' },
     ];
 
     if (isAdmin()) {
@@ -98,7 +99,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                     marginTop: '64px',
                 }}
             >
-                {children}
+                <Outlet />
             </Box>
         </Box>
     );

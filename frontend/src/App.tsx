@@ -11,6 +11,7 @@ import { TimeEntries } from './pages/TimeEntries';
 import { Projects } from './pages/Projects';
 import { Tasks } from './pages/Tasks';
 import { Users } from './pages/Users';
+import { Reports } from './pages/Reports';
 
 const queryClient = new QueryClient();
 
@@ -36,7 +37,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         return <Navigate to="/login" />;
     }
 
-    return <MainLayout>{children}</MainLayout>;
+    return children;
 };
 
 const App = () => {
@@ -50,41 +51,20 @@ const App = () => {
                                 <Routes>
                                     <Route path="/login" element={<Login />} />
                                     <Route
-                                        path="/time-entries"
-                                        element={
-                                            <ProtectedRoute>
-                                                <TimeEntries />
-                                            </ProtectedRoute>
-                                        }
-                                    />
-                                    <Route
-                                        path="/projects"
-                                        element={
-                                            <ProtectedRoute>
-                                                <Projects />
-                                            </ProtectedRoute>
-                                        }
-                                    />
-                                    <Route
-                                        path="/tasks"
-                                        element={
-                                            <ProtectedRoute>
-                                                <Tasks />
-                                            </ProtectedRoute>
-                                        }
-                                    />
-                                    <Route
-                                        path="/users"
-                                        element={
-                                            <ProtectedRoute>
-                                                <Users />
-                                            </ProtectedRoute>
-                                        }
-                                    />
-                                    <Route
                                         path="/"
-                                        element={<Navigate to="/time-entries" />}
-                                    />
+                                        element={
+                                            <ProtectedRoute>
+                                                <MainLayout />
+                                            </ProtectedRoute>
+                                        }
+                                    >
+                                        <Route index element={<Navigate to="/time-entries" replace />} />
+                                        <Route path="time-entries" element={<TimeEntries />} />
+                                        <Route path="projects" element={<Projects />} />
+                                        <Route path="tasks" element={<Tasks />} />
+                                        <Route path="reports" element={<Reports />} />
+                                        <Route path="users" element={<Users />} />
+                                    </Route>
                                 </Routes>
                             </BrowserRouter>
                         </AuthProvider>
