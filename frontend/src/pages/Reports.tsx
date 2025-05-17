@@ -38,6 +38,7 @@ export const Reports = () => {
     const [selectedStatus, setSelectedStatus] = useState<TimeEntryStatus | ''>('');
     const [startDate, setStartDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
     const { user, isManager } = useAuth();
     const { enqueueSnackbar } = useSnackbar();
 
@@ -125,7 +126,7 @@ export const Reports = () => {
     const availableTasks = React.useMemo(() => {
         if (!tasks || !selectedProject) return [];
         
-        return tasks.filter(task => task.project_id === selectedProject);
+        return tasks.filter(task => task.project_id === Number(selectedProject));
     }, [tasks, selectedProject]);
 
     // Calculate summary statistics
@@ -158,15 +159,30 @@ export const Reports = () => {
             return;
         }
 
+        setIsGeneratingReport(true);
+        
         try {
-            const response = await api.generateReport({
-                user_id: selectedUser ? Number(selectedUser) : user?.id,
+            // Ensure dates are properly formatted
+            const formattedStartDate = format(startDate, 'yyyy-MM-dd');
+            const formattedEndDate = format(endDate, 'yyyy-MM-dd');
+            
+            // Create a payload with proper types
+            const payload = {
+                user_id: selectedUser ? Number(selectedUser) : (user?.id || undefined),
                 project_id: selectedProject ? Number(selectedProject) : undefined,
                 task_id: selectedTask ? Number(selectedTask) : undefined,
                 status: selectedStatus || undefined,
-                start_date: format(startDate, 'yyyy-MM-dd'),
-                end_date: format(endDate, 'yyyy-MM-dd')
-            });
+                start_date: formattedStartDate,
+                end_date: formattedEndDate
+            };
+            
+            console.log('Sending report request with payload:', payload);
+            
+            const response = await api.generateReport(payload);
+            
+            if (!response || !response.data) {
+                throw new Error('Empty response received');
+            }
 
             // Create a blob from the PDF data and download it
             const blob = new Blob([response.data], { type: 'application/pdf' });
@@ -183,22 +199,38 @@ export const Reports = () => {
             console.error('Error generating report:', error);
             let errorMessage = 'Failed to generate report';
             
-            // Try to extract error message from response
-            if (error.response?.data) {
-                if (error.response.data instanceof Blob) {
-                    try {
-                        const text = await error.response.data.text();
-                        const errorData = JSON.parse(text);
-                        errorMessage = errorData.detail || errorData.message || errorMessage;
-                    } catch (e) {
-                        console.error('Error parsing error response:', e);
+            if (error.response) {
+                console.log('Error response status:', error.response.status);
+                console.log('Error response headers:', error.response.headers);
+                
+                // Try to extract error message from response
+                if (error.response.data) {
+                    if (error.response.data instanceof Blob) {
+                        try {
+                            const text = await error.response.data.text();
+                            try {
+                                const errorData = JSON.parse(text);
+                                errorMessage = errorData.detail || errorData.message || errorMessage;
+                            } catch (e) {
+                                // If can't parse as JSON, use the text directly
+                                errorMessage = text || errorMessage;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing error response:', e);
+                        }
+                    } else if (typeof error.response.data === 'object') {
+                        errorMessage = error.response.data.detail || error.response.data.message || errorMessage;
+                    } else if (typeof error.response.data === 'string') {
+                        errorMessage = error.response.data;
                     }
-                } else {
-                    errorMessage = error.response.data.detail || error.response.data.message || errorMessage;
                 }
+            } else if (error.message) {
+                errorMessage = error.message;
             }
             
             enqueueSnackbar(errorMessage, { variant: 'error' });
+        } finally {
+            setIsGeneratingReport(false);
         }
     };
 
@@ -350,9 +382,9 @@ export const Reports = () => {
                             variant="contained"
                             startIcon={<Download />}
                             onClick={handleGenerateReport}
-                            disabled={!startDate || !endDate}
+                            disabled={!startDate || !endDate || isGeneratingReport}
                         >
-                            Download Report
+                            {isGeneratingReport ? 'Generating...' : 'Download Report'}
                         </Button>
                     </Box>
 

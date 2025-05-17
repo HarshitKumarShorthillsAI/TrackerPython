@@ -30,7 +30,8 @@ import {
     FormControlLabel,
     Switch,
     Stack,
-    DialogContentText
+    DialogContentText,
+    CircularProgress
 } from '@mui/material';
 import {
     PlayArrow,
@@ -48,7 +49,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
 import { format, differenceInHours, differenceInMinutes, parseISO } from 'date-fns';
-import { TimeEntry, TimeEntryStatus, Task, Project, UserRole } from '../types/index';
+import { TimeEntry, TimeEntryStatus, Task, Project, UserRole, ProjectWithTeam, User } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
@@ -92,9 +93,9 @@ const getStatusChipColor = (status: TimeEntryStatus) => {
 
 interface PendingApprovalsProps {
     timeEntries: TimeEntry[];
-    projects: Project[];
+    projects: ProjectWithTeam[];
     tasks: Task[];
-    employees: any[];
+    employees: User[];
     onApprove: (timeEntry: TimeEntry) => void;
     onReject: (timeEntry: TimeEntry) => void;
 }
@@ -221,37 +222,138 @@ export const TimeEntries = () => {
     const { user } = useAuth();
     const { enqueueSnackbar } = useSnackbar();
 
-    // Query for basic project list
-    const { data: projects, isLoading: isLoadingProjects, error: projectsError } = useQuery({
+    // Force refresh data when user changes or component mounts
+    useEffect(() => {
+        if (user) {
+            // Invalidate and refetch all relevant queries
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks'] });
+            queryClient.invalidateQueries({ queryKey: ['timeEntries'] });
+            queryClient.invalidateQueries({ queryKey: ['employees'] });
+        }
+    }, [user, queryClient]);
+
+    // Query for projects with team members
+    const { data: projects, isLoading: isLoadingProjects, error: projectsError, refetch: refetchProjects } = useQuery<ProjectWithTeam[]>({
         queryKey: ['projects'],
-        queryFn: api.getProjects,
-        staleTime: 5 * 60 * 1000
+        queryFn: async () => {
+            try {
+                // Get all projects first
+                const projectsList = await api.getProjects();
+                
+                // Then fetch full details for each project
+                const projectsWithTeam = await Promise.all(
+                    projectsList.map(project => api.getProject(project.id))
+                );
+                
+                return projectsWithTeam;
+            } catch (error) {
+                console.error('Error fetching projects:', error);
+                throw error;
+            }
+        },
+        enabled: Boolean(user?.id), // Only run query when user is logged in
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: true,
+        refetchOnMount: true,
+        retry: 2
     });
 
-    const { data: tasks, isLoading: isLoadingTasks } = useQuery({
+    const { data: tasks, isLoading: isLoadingTasks, refetch: refetchTasks } = useQuery<Task[]>({
         queryKey: ['tasks'],
-        queryFn: api.getTasks
+        queryFn: api.getTasks,
+        enabled: Boolean(user?.id) && Boolean(projects), // Only fetch tasks after projects are loaded
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: true,
+        refetchOnMount: true
     });
 
-    const { data: timeEntries, isLoading: isLoadingTimeEntries } = useQuery({
+    const { data: timeEntries, isLoading: isLoadingTimeEntries, refetch: refetchTimeEntries } = useQuery<TimeEntry[]>({
         queryKey: ['timeEntries'],
-        queryFn: () => api.getTimeEntries(undefined)
+        queryFn: () => api.getTimeEntries(undefined),
+        enabled: Boolean(user?.id) && Boolean(projects) && Boolean(tasks), // Only fetch time entries after projects and tasks are loaded
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: true,
+        refetchOnMount: true
     });
 
     // Query for employees data
-    const { data: employees } = useQuery({
+    const { data: employees, refetch: refetchEmployees } = useQuery<User[]>({
         queryKey: ['employees'],
         queryFn: api.getEmployees,
-        enabled: user?.is_superuser || user?.role === UserRole.MANAGER
+        enabled: Boolean(user?.id) && (user?.is_superuser || user?.role === UserRole.MANAGER),
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: true,
+        refetchOnMount: true
     });
 
-    // Get available projects for the user
+    // Function to manually refresh all data
+    const refreshAllData = useCallback(async () => {
+        try {
+            await Promise.all([
+                refetchProjects(),
+                refetchTasks(),
+                refetchTimeEntries(),
+                refetchEmployees()
+            ]);
+            enqueueSnackbar('Data refreshed successfully', { variant: 'success' });
+        } catch (error) {
+            console.error('Error refreshing data:', error);
+            enqueueSnackbar('Failed to refresh data. Please try again.', { variant: 'error' });
+        }
+    }, [refetchProjects, refetchTasks, refetchTimeEntries, refetchEmployees, enqueueSnackbar]);
+
+    // Refresh data periodically
+    useEffect(() => {
+        if (!user) return;
+
+        const intervalId = setInterval(() => {
+            refreshAllData();
+        }, 5 * 60 * 1000); // Refresh every 5 minutes
+
+        return () => clearInterval(intervalId);
+    }, [user, refreshAllData]);
+
+    // Filter projects based on user role and team membership
     const availableProjects = React.useMemo(() => {
-        if (!projects) return [];
-        
-        // The backend API already filters projects based on user permissions
-        // and team membership, so we can use the projects list directly
-        return projects;
+        if (!projects || !user || isLoadingProjects) {
+            console.log('Projects not ready:', { projects, user, isLoadingProjects });
+            return [];
+        }
+
+        // Validate project data
+        const validProjects = projects.filter(project => {
+            if (!project || typeof project.id !== 'number' || !project.name) {
+                console.warn('Invalid project data:', project);
+                return false;
+            }
+            return true;
+        });
+
+        // Superusers and managers can see all projects
+        if (user.is_superuser || user.role === UserRole.MANAGER) {
+            return validProjects;
+        }
+
+        // Regular users can only see projects where they are team members
+        return validProjects.filter((project: ProjectWithTeam) => {
+            if (!Array.isArray(project.team_members)) {
+                console.warn('Project has invalid team_members:', project);
+                return false;
+            }
+            return project.team_members.some(member => member.id === user.id);
+        });
+    }, [projects, user, isLoadingProjects]);
+
+    // Add debug logging for project data
+    useEffect(() => {
+        if (projects) {
+            console.log('Projects loaded:', {
+                count: projects.length,
+                hasTeamMembers: projects.every(p => Array.isArray(p.team_members)),
+                projects: projects
+            });
+        }
     }, [projects]);
 
     // Get available tasks based on selected project and user assignments
@@ -267,7 +369,7 @@ export const TimeEntries = () => {
 
             // Managers can see all tasks in their projects
             if (user.role === UserRole.MANAGER) {
-                const project = projects?.find(p => p.id === task.project_id);
+                const project = projects?.find((p: ProjectWithTeam) => p.id === task.project_id);
                 if (project?.manager_id === user.id) return true;
             }
 
@@ -293,9 +395,9 @@ export const TimeEntries = () => {
             
             // Managers can see all time entries from their projects
             if (user.role === UserRole.MANAGER) {
-                return projects.some(project => 
+                return projects.some((project: ProjectWithTeam) => 
                     project.id === entry.project_id && 
-                    (project.manager_id === user.id || project.team_members?.includes(user.id))
+                    (project.manager_id === user.id || project.team_members.some(member => member.id === user.id))
                 );
             }
             
@@ -319,9 +421,9 @@ export const TimeEntries = () => {
 
             // Managers can see pending entries from their projects
             if (user.role === UserRole.MANAGER) {
-                return projects.some(project => 
+                return projects.some((project: ProjectWithTeam) => 
                     project.id === entry.project_id && 
-                    (project.manager_id === user.id || project.team_members?.includes(user.id))
+                    (project.manager_id === user.id || project.team_members.some(member => member.id === user.id))
                 );
             }
 
@@ -690,24 +792,69 @@ export const TimeEntries = () => {
         }, { totalHours: 0, totalCost: 0 });
     };
 
-    if (isLoadingTimeEntries || isLoadingTasks || isLoadingProjects) {
-        return <Typography>Loading...</Typography>;
+    // Update the loading check to be more specific
+    const isInitialLoading = isLoadingTimeEntries || isLoadingTasks || isLoadingProjects;
+    const isDataReady = !!projects && !!tasks && !!timeEntries;
+
+    if (isInitialLoading || !isDataReady) {
+        return (
+            <Container maxWidth="xl">
+                <Box sx={{ 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    minHeight: '50vh',
+                    gap: 2
+                }}>
+                    <CircularProgress size={40} />
+                    <Typography variant="h6" color="textSecondary">
+                        {isLoadingProjects ? 'Loading projects...' : 
+                         isLoadingTasks ? 'Loading tasks...' :
+                         isLoadingTimeEntries ? 'Loading time entries...' :
+                         'Preparing timesheet data...'}
+                    </Typography>
+                </Box>
+            </Container>
+        );
+    }
+
+    // Add error display for any loading errors
+    if (projectsError) {
+        return (
+            <Container maxWidth="xl">
+                <Alert 
+                    severity="error" 
+                    sx={{ 
+                        mt: 2,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'start'
+                    }}
+                >
+                    <Typography variant="subtitle1" gutterBottom>
+                        Failed to load projects. Please try:
+                    </Typography>
+                    <Box component="ul" sx={{ mt: 1, mb: 1 }}>
+                        <li>Refreshing the page</li>
+                        <li>Checking your internet connection</li>
+                        <li>Contacting support if the problem persists</li>
+                    </Box>
+                    {projectsError instanceof Error && (
+                        <Typography variant="caption" color="textSecondary" sx={{ mt: 1 }}>
+                            Error details: {projectsError.message}
+                        </Typography>
+                    )}
+                </Alert>
+            </Container>
+        );
     }
 
     const { totalHours, totalCost } = calculateTotalHoursAndCost(filteredTimeEntries);
 
-    // Add error display for projects loading
-    if (projectsError) {
-        return (
-            <Alert severity="error" sx={{ mt: 2 }}>
-                Failed to load projects. Please refresh the page or contact support.
-            </Alert>
-        );
-    }
-
     // Update project finding in the table cells
-    const findProject = (projectId: number): Project | undefined => {
-        return projects?.find((p: Project) => p.id === projectId);
+    const findProject = (projectId: number): ProjectWithTeam | undefined => {
+        return projects?.find((p: ProjectWithTeam) => p.id === projectId);
     };
 
     return (
@@ -894,91 +1041,134 @@ export const TimeEntries = () => {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {filteredTimeEntries?.map((entry: TimeEntry) => (
-                            <TableRow key={entry.id}>
-                                {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
-                                    <TableCell>
-                                        {employees?.find(e => e.id === entry.user_id)?.full_name || 'Unknown'}
-                                    </TableCell>
-                                )}
-                                <TableCell>
-                                    {findProject(entry.project_id)?.name}
-                                </TableCell>
-                                <TableCell>
-                                    {tasks?.find(t => t.id === entry.task_id)?.title}
-                                </TableCell>
-                                <TableCell>{entry.description || '-'}</TableCell>
-                                <TableCell>
-                                    {format(parseISO(entry.start_time), 'yyyy-MM-dd HH:mm')}
-                                </TableCell>
-                                <TableCell>
-                                    {entry.end_time && format(parseISO(entry.end_time), 'yyyy-MM-dd HH:mm')}
-                                </TableCell>
-                                <TableCell>{calculateDuration(entry)}</TableCell>
-                                <TableCell>${calculateCost(entry)}</TableCell>
-                                <TableCell>
-                                    <Tooltip 
-                                        title={entry.rejection_reason ? `Rejection reason: ${entry.rejection_reason}` : ''} 
-                                        arrow
-                                    >
-                                        <Chip
-                                            label={entry.status}
-                                            color={getStatusChipColor(entry.status)}
-                                            icon={entry.rejection_reason ? <Info /> : undefined}
-                                        />
-                                    </Tooltip>
-                                </TableCell>
-                                <TableCell>
-                                    <Stack direction="row" spacing={1}>
-                                        {entry.status === TimeEntryStatus.DRAFT && entry.user_id === user?.id && (
-                                            <>
-                                                <IconButton onClick={() => handleEditTimeEntry(entry)} size="small">
-                                                    <Edit />
-                                                </IconButton>
-                                                <IconButton
-                                                    size="small"
-                                                    color="primary"
-                                                    onClick={() => handleSubmitTimeEntry(entry.id)}
-                                                >
-                                                    <Send />
-                                                </IconButton>
-                                            </>
-                                        )}
-                                        {entry.status === TimeEntryStatus.SUBMITTED &&
-                                            (user?.is_superuser || user?.role === UserRole.MANAGER) && (
-                                            <>
-                                                <IconButton
-                                                    onClick={() => handleApproveTimeEntry(entry)}
-                                                    size="small"
-                                                    color="success"
-                                                >
-                                                    <Check />
-                                                </IconButton>
-                                                <IconButton
-                                                    onClick={() => handleOpenRejectDialog(entry)}
-                                                    size="small"
-                                                    color="error"
-                                                >
-                                                    <Close />
-                                                </IconButton>
-                                            </>
-                                        )}
-                                        {entry.status === TimeEntryStatus.APPROVED &&
-                                            (user?.is_superuser || user?.role === UserRole.MANAGER) && (
-                                            <IconButton
-                                                onClick={() => handleMarkBilled(entry)}
-                                                size="small"
-                                            >
-                                                <AttachMoney />
-                                            </IconButton>
-                                        )}
-                                    </Stack>
+                        {!filteredTimeEntries?.length ? (
+                            <TableRow>
+                                <TableCell 
+                                    colSpan={user?.is_superuser || user?.role === UserRole.MANAGER ? 10 : 9}
+                                    align="center"
+                                >
+                                    <Box sx={{ py: 3 }}>
+                                        <Typography variant="subtitle1" color="textSecondary">
+                                            No time entries found
+                                        </Typography>
+                                        <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                                            Create a new time entry using the form above
+                                        </Typography>
+                                    </Box>
                                 </TableCell>
                             </TableRow>
-                        ))}
+                        ) : (
+                            filteredTimeEntries.map((entry: TimeEntry) => (
+                                <TableRow key={entry.id}>
+                                    {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                                        <TableCell>
+                                            {employees?.find(e => e.id === entry.user_id)?.full_name || 'Unknown'}
+                                        </TableCell>
+                                    )}
+                                    <TableCell>
+                                        {findProject(entry.project_id)?.name}
+                                    </TableCell>
+                                    <TableCell>
+                                        {tasks?.find(t => t.id === entry.task_id)?.title}
+                                    </TableCell>
+                                    <TableCell>{entry.description || '-'}</TableCell>
+                                    <TableCell>
+                                        {format(parseISO(entry.start_time), 'yyyy-MM-dd HH:mm')}
+                                    </TableCell>
+                                    <TableCell>
+                                        {entry.end_time && format(parseISO(entry.end_time), 'yyyy-MM-dd HH:mm')}
+                                    </TableCell>
+                                    <TableCell>{calculateDuration(entry)}</TableCell>
+                                    <TableCell>${calculateCost(entry)}</TableCell>
+                                    <TableCell>
+                                        <Tooltip 
+                                            title={entry.rejection_reason ? `Rejection reason: ${entry.rejection_reason}` : ''} 
+                                            arrow
+                                        >
+                                            <Chip
+                                                label={entry.status}
+                                                color={getStatusChipColor(entry.status)}
+                                                icon={entry.rejection_reason ? <Info /> : undefined}
+                                            />
+                                        </Tooltip>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Stack direction="row" spacing={1}>
+                                            {entry.status === TimeEntryStatus.DRAFT && entry.user_id === user?.id && (
+                                                <>
+                                                    <IconButton onClick={() => handleEditTimeEntry(entry)} size="small">
+                                                        <Edit />
+                                                    </IconButton>
+                                                    <IconButton
+                                                        size="small"
+                                                        color="primary"
+                                                        onClick={() => handleSubmitTimeEntry(entry.id)}
+                                                    >
+                                                        <Send />
+                                                    </IconButton>
+                                                </>
+                                            )}
+                                            {entry.status === TimeEntryStatus.SUBMITTED &&
+                                                (user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                                                <>
+                                                    <IconButton
+                                                        onClick={() => handleApproveTimeEntry(entry)}
+                                                        size="small"
+                                                        color="success"
+                                                    >
+                                                        <Check />
+                                                    </IconButton>
+                                                    <IconButton
+                                                        onClick={() => handleOpenRejectDialog(entry)}
+                                                        size="small"
+                                                        color="error"
+                                                    >
+                                                        <Close />
+                                                    </IconButton>
+                                                </>
+                                            )}
+                                            {entry.status === TimeEntryStatus.APPROVED &&
+                                                (user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                                                <IconButton
+                                                    onClick={() => handleMarkBilled(entry)}
+                                                    size="small"
+                                                >
+                                                    <AttachMoney />
+                                                </IconButton>
+                                            )}
+                                        </Stack>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
                     </TableBody>
                 </Table>
             </TableContainer>
+
+            {/* Add loading overlay */}
+            {(isLoadingTimeEntries || isLoadingProjects || isLoadingTasks) && (
+                <Box
+                    sx={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                        zIndex: 1,
+                    }}
+                >
+                    <Box sx={{ textAlign: 'center' }}>
+                        <CircularProgress size={40} />
+                        <Typography variant="body2" sx={{ mt: 2 }}>
+                            Updating timesheet...
+                        </Typography>
+                    </Box>
+                </Box>
+            )}
 
             <Box sx={{ mt: 3, mb: 2 }}>
                 <Paper sx={{ p: 2 }}>
