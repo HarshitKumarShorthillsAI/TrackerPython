@@ -153,7 +153,9 @@ async def generate_report(
                 manager_id=current_user.id,
                 skip=0,
                 limit=1000,
-                project_id=project_id
+                project_id=project_id,
+                start_date=start_date,
+                end_date=end_date
             )
             if user_id:
                 time_entries = [entry for entry in time_entries if entry.user_id == user_id]
@@ -163,14 +165,10 @@ async def generate_report(
                 user_id=current_user.id,
                 skip=0,
                 limit=1000,
-                project_id=project_id
+                project_id=project_id,
+                start_date=start_date,
+                end_date=end_date
             )
-
-        # Filter by date range
-        time_entries = [
-            entry for entry in time_entries
-            if start_date <= datetime.fromisoformat(entry.start_time.replace('Z', '+00:00')) <= end_date
-        ]
 
         if not time_entries:
             raise HTTPException(
