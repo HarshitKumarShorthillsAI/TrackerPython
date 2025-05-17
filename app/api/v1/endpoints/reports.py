@@ -14,7 +14,7 @@ from app.crud.crud_time_entry import crud_time_entry
 from app.crud.crud_project import project as crud_project
 from app.crud.crud_task import task as crud_task
 from app.models.user import User, UserRole
-from app.models.time_entry import TimeEntry
+from app.models.time_entry import TimeEntry, TimeEntryStatus
 from app.models.project import Project
 
 router = APIRouter()
@@ -25,6 +25,8 @@ def create_pdf_report(
     start_date: date,
     end_date: date,
     project_id: Optional[int] = None,
+    task_id: Optional[int] = None,
+    status: Optional[TimeEntryStatus] = None,
     db: Session = None
 ) -> bytes:
     try:
@@ -51,10 +53,20 @@ def create_pdf_report(
         )
         elements.append(Paragraph(f"User: {user.full_name}", info_style))
         elements.append(Paragraph(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}", info_style))
+        
         if project_id and db:
             project = crud_project.get(db=db, id=project_id)
             if project:
                 elements.append(Paragraph(f"Project: {project.name}", info_style))
+        
+        if task_id and db:
+            task = crud_task.get(db=db, id=task_id)
+            if task:
+                elements.append(Paragraph(f"Task: {task.title}", info_style))
+        
+        if status:
+            elements.append(Paragraph(f"Status: {status.value}", info_style))
+        
         elements.append(Spacer(1, 20))
 
         # Summary Statistics
@@ -160,6 +172,8 @@ async def generate_report(
     current_user: User = Depends(deps.get_current_user),
     user_id: Optional[int] = None,
     project_id: Optional[int] = None,
+    task_id: Optional[int] = None,
+    status: Optional[TimeEntryStatus] = None,
 ):
     """Generate a PDF report of time entries."""
     try:
@@ -205,6 +219,14 @@ async def generate_report(
                         detail="Not authorized to access this project's time entries"
                     )
 
+        # Apply task filter
+        if task_id:
+            query = query.filter(TimeEntry.task_id == task_id)
+
+        # Apply status filter
+        if status:
+            query = query.filter(TimeEntry.status == status)
+
         # Get the time entries
         time_entries = query.order_by(TimeEntry.start_time.desc()).all()
 
@@ -222,6 +244,8 @@ async def generate_report(
                 start_date=start_date,
                 end_date=end_date,
                 project_id=project_id,
+                task_id=task_id,
+                status=status,
                 db=db
             )
         except Exception as e:

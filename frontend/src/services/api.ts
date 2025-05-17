@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { LoginRequest, LoginResponse, Project, ProjectWithTeam, Task, TimeEntry, User, UserRole } from '../types/index';
+import { LoginRequest, LoginResponse, Project, ProjectWithTeam, Task, TimeEntry, User, UserRole, TimeEntryStatus } from '../types/index';
 
 const API_URL = 'http://localhost:8010/api/v1';
 
@@ -123,6 +123,7 @@ export const deleteTask = async (id: number): Promise<void> => {
 export const getTimeEntries = async (
     user_id?: number,
     project_id?: number,
+    task_id?: number,
     start_date?: string,
     end_date?: string
 ) => {
@@ -132,6 +133,7 @@ export const getTimeEntries = async (
         
         if (user_id) params.append('user_id', user_id.toString());
         if (project_id) params.append('project_id', project_id.toString());
+        if (task_id) params.append('task_id', task_id.toString());
         if (start_date) params.append('start_date', start_date);
         if (end_date) params.append('end_date', end_date);
         
@@ -186,6 +188,8 @@ export const markTimeEntryBilled = async (id: number): Promise<TimeEntry> => {
 export interface ReportParams {
     user_id?: number;
     project_id?: number;
+    task_id?: number;
+    status?: TimeEntryStatus;
     start_date: string;
     end_date: string;
 }

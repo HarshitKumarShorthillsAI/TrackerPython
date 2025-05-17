@@ -13,7 +13,6 @@ import {
     DialogContent,
     DialogActions,
     Select,
-
     MenuItem,
     FormControl,
     InputLabel,
@@ -66,9 +65,19 @@ export const Projects = () => {
 
     const createMutation = useMutation({
         mutationFn: (data: ProjectCreate) => api.createProject(data),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['projects'] });
-            handleCloseDialog();
+        onSuccess: (newProject) => {
+            // If there are team members to add, update the project right after creation
+            if (formData.team_members.length > 0) {
+                updateMutation.mutate({
+                    id: newProject.id,
+                    project: {
+                        team_members: formData.team_members
+                    }
+                });
+            } else {
+                queryClient.invalidateQueries({ queryKey: ['projects'] });
+                handleCloseDialog();
+            }
         },
         onError: (error: any) => {
             console.error('Error creating project:', error.response?.data);
@@ -142,7 +151,6 @@ export const Projects = () => {
         }
 
         if (editingProject) {
-            // For updates, include team members
             const updateData: ProjectUpdate = {
                 name: formData.name,
                 description: formData.description || undefined,
@@ -158,14 +166,15 @@ export const Projects = () => {
                 project: updateData
             });
         } else {
-            // For creation, exclude team members
+            // For creation, include all data in one go
             const createData: ProjectCreate = {
                 name: formData.name,
                 description: formData.description || undefined,
                 status: formData.status,
                 budget_hours: Number(formData.budget_hours),
                 hourly_rate: Number(formData.hourly_rate),
-                manager_id: formData.manager_id || null
+                manager_id: formData.manager_id || null,
+                team_members: formData.team_members // Include team members in creation
             };
 
             createMutation.mutate(createData);
@@ -403,7 +412,7 @@ export const Projects = () => {
                                     label="Team Members"
                                     renderValue={(selected) => (
                                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                            {(selected as number[]).map((value) => (
+                                            {(selected).map((value) => (
                                                 <Chip
                                                     key={value}
                                                     label={users?.find(u => u.id === value)?.full_name || ''}
@@ -474,4 +483,4 @@ export const Projects = () => {
             </Dialog>
         </Box>
     );
-}; 
+};

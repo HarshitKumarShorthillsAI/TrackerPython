@@ -25,15 +25,17 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../services/api';
-import { format } from 'date-fns';
+import { format, parseISO, startOfDay } from 'date-fns';
 import { Download } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useSnackbar } from 'notistack';
-import { TimeEntry } from '../types/index';
+import { TimeEntry, Task, ProjectWithTeam, UserRole, User, TimeEntryStatus } from '../types/index';
 
 export const Reports = () => {
     const [selectedUser, setSelectedUser] = useState<number | ''>('');
     const [selectedProject, setSelectedProject] = useState<number | ''>('');
+    const [selectedTask, setSelectedTask] = useState<number | ''>('');
+    const [selectedStatus, setSelectedStatus] = useState<TimeEntryStatus | ''>('');
     const [startDate, setStartDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
     const { user, isManager } = useAuth();
@@ -46,21 +48,85 @@ export const Reports = () => {
         enabled: isManager()
     });
 
-    const { data: projects } = useQuery({
+    // Query for projects with team members
+    const { data: projects, isLoading: isLoadingProjects } = useQuery({
         queryKey: ['projects'],
-        queryFn: api.getProjects
+        queryFn: async () => {
+            // Get all projects first
+            const projectsList = await api.getProjects();
+            
+            // Then fetch full details for each project
+            const projectsWithTeam = await Promise.all(
+                projectsList.map(project => api.getProject(project.id))
+            );
+            
+            return projectsWithTeam;
+        }
     });
 
+    const { data: tasks } = useQuery({
+        queryKey: ['tasks'],
+        queryFn: api.getTasks
+    });
+
+    // Query for time entries with task and status filtering
     const { data: timeEntries, isLoading } = useQuery({
-        queryKey: ['timeEntries', selectedUser, selectedProject, startDate, endDate],
+        queryKey: ['timeEntries', selectedUser, selectedProject, selectedTask, selectedStatus, startDate, endDate],
         queryFn: () => api.getTimeEntries(
             selectedUser ? Number(selectedUser) : user?.id,
             selectedProject ? Number(selectedProject) : undefined,
+            selectedTask ? Number(selectedTask) : undefined,
             startDate ? format(startDate, 'yyyy-MM-dd') : undefined,
             endDate ? format(endDate, 'yyyy-MM-dd') : undefined
         ),
-        enabled: !!(startDate && endDate) // Only fetch when dates are selected
+        enabled: !!(startDate && endDate), // Only fetch when dates are selected
+        select: (data) => {
+            if (!data) return [];
+            
+            return data.filter((entry: TimeEntry) => {
+                // Filter by date
+                if (startDate && endDate) {
+                    const entryStartDate = startOfDay(parseISO(entry.start_time));
+                    const filterStartDate = startOfDay(startDate);
+                    const filterEndDate = startOfDay(endDate);
+                    if (!(entryStartDate >= filterStartDate && entryStartDate <= filterEndDate)) {
+                        return false;
+                    }
+                }
+
+                // Filter by status
+                if (selectedStatus && entry.status !== selectedStatus) {
+                    return false;
+                }
+
+                return true;
+            });
+        }
     });
+
+    // Filter projects based on user role and team membership
+    const availableProjects = React.useMemo(() => {
+        if (!projects || !user || isLoadingProjects) return [];
+
+        // Superusers and managers can see all projects
+        if (user.is_superuser || user.role === UserRole.MANAGER) {
+            return projects;
+        }
+
+        // Regular users can only see projects where they are team members
+        return projects.filter((project: ProjectWithTeam) => {
+            // Check if team_members exists and is an array before using some()
+            return Array.isArray(project.team_members) && 
+                project.team_members.some((member: User) => member.id === user.id);
+        });
+    }, [projects, user, isLoadingProjects]);
+
+    // Get available tasks based on selected project
+    const availableTasks = React.useMemo(() => {
+        if (!tasks || !selectedProject) return [];
+        
+        return tasks.filter(task => task.project_id === selectedProject);
+    }, [tasks, selectedProject]);
 
     // Calculate summary statistics
     const calculateSummary = () => {
@@ -68,12 +134,15 @@ export const Reports = () => {
 
         const uniqueProjects = new Set(timeEntries.map((entry: TimeEntry) => entry.project_id));
         const uniqueTasks = new Set(timeEntries.map((entry: TimeEntry) => entry.task_id));
+        
         const totalHours = timeEntries.reduce((sum: number, entry: TimeEntry) => {
-            if (!entry.end_time) return sum;
-            const start = new Date(entry.start_time);
-            const end = new Date(entry.end_time);
-            const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-            return sum + hours;
+            if (entry.end_time) {
+                const start = new Date(entry.start_time);
+                const end = new Date(entry.end_time);
+                const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+                return sum + hours;
+            }
+            return sum;
         }, 0);
 
         return {
@@ -93,6 +162,8 @@ export const Reports = () => {
             const response = await api.generateReport({
                 user_id: selectedUser ? Number(selectedUser) : user?.id,
                 project_id: selectedProject ? Number(selectedProject) : undefined,
+                task_id: selectedTask ? Number(selectedTask) : undefined,
+                status: selectedStatus || undefined,
                 start_date: format(startDate, 'yyyy-MM-dd'),
                 end_date: format(endDate, 'yyyy-MM-dd')
             });
@@ -166,15 +237,53 @@ export const Reports = () => {
                                 <InputLabel>Project</InputLabel>
                                 <Select
                                     value={selectedProject}
-                                    onChange={(e) => setSelectedProject(e.target.value as number)}
+                                    onChange={(e) => {
+                                        setSelectedProject(e.target.value as number);
+                                        setSelectedTask(''); // Reset task when project changes
+                                    }}
                                     label="Project"
                                 >
                                     <MenuItem value="">All Projects</MenuItem>
-                                    {projects?.map((project) => (
+                                    {availableProjects.map((project) => (
                                         <MenuItem key={project.id} value={project.id}>
                                             {project.name}
                                         </MenuItem>
                                     ))}
+                                </Select>
+                            </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={3}>
+                            <FormControl fullWidth>
+                                <InputLabel>Task</InputLabel>
+                                <Select
+                                    value={selectedTask}
+                                    onChange={(e) => setSelectedTask(e.target.value as number)}
+                                    label="Task"
+                                    disabled={!selectedProject}
+                                >
+                                    <MenuItem value="">All Tasks</MenuItem>
+                                    {availableTasks.map((task) => (
+                                        <MenuItem key={task.id} value={task.id}>
+                                            {task.title}
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={3}>
+                            <FormControl fullWidth>
+                                <InputLabel>Status</InputLabel>
+                                <Select
+                                    value={selectedStatus}
+                                    onChange={(e) => setSelectedStatus(e.target.value as TimeEntryStatus)}
+                                    label="Status"
+                                >
+                                    <MenuItem value="">All Statuses</MenuItem>
+                                    <MenuItem value={TimeEntryStatus.DRAFT}>Draft</MenuItem>
+                                    <MenuItem value={TimeEntryStatus.SUBMITTED}>Submitted</MenuItem>
+                                    <MenuItem value={TimeEntryStatus.APPROVED}>Approved</MenuItem>
+                                    <MenuItem value={TimeEntryStatus.REJECTED}>Rejected</MenuItem>
+                                    <MenuItem value={TimeEntryStatus.BILLED}>Billed</MenuItem>
                                 </Select>
                             </FormControl>
                         </Grid>
@@ -260,6 +369,7 @@ export const Reports = () => {
                                     <TableRow>
                                         <TableCell>Date</TableCell>
                                         <TableCell>Project</TableCell>
+                                        <TableCell>Task</TableCell>
                                         <TableCell>Description</TableCell>
                                         <TableCell>Hours</TableCell>
                                         <TableCell>Status</TableCell>
@@ -267,7 +377,9 @@ export const Reports = () => {
                                 </TableHead>
                                 <TableBody>
                                     {timeEntries?.map((entry: TimeEntry) => {
-                                        const project = projects?.find(p => p.id === entry.project_id);
+                                        const project = availableProjects?.find(p => p.id === entry.project_id);
+                                        const task = tasks?.find(t => t.id === entry.task_id);
+                                        
                                         const hours = entry.end_time
                                             ? (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / (1000 * 60 * 60)
                                             : 0;
@@ -275,9 +387,10 @@ export const Reports = () => {
                                         return (
                                             <TableRow key={entry.id}>
                                                 <TableCell>
-                                                    {format(new Date(entry.start_time), 'MMM dd, yyyy')}
+                                                    {format(parseISO(entry.start_time), 'MMM dd, yyyy')}
                                                 </TableCell>
                                                 <TableCell>{project?.name || 'Unknown Project'}</TableCell>
+                                                <TableCell>{task?.title || 'Unknown Task'}</TableCell>
                                                 <TableCell>{entry.description || '-'}</TableCell>
                                                 <TableCell>{Math.round(hours * 100) / 100}</TableCell>
                                                 <TableCell>{entry.status}</TableCell>
@@ -292,4 +405,4 @@ export const Reports = () => {
             )}
         </Box>
     );
-}; 
+};
