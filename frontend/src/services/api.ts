@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { LoginRequest, LoginResponse, Project, Task, TimeEntry, User } from '../types';
+import { LoginRequest, LoginResponse, Project, ProjectWithTeam, Task, TimeEntry, User, UserRole } from '../types/index';
 
 const API_URL = 'http://localhost:8010/api/v1';
 
@@ -80,7 +80,7 @@ export const getProjects = async (): Promise<Project[]> => {
     return response.data;
 };
 
-export const getProject = async (id: number): Promise<Project> => {
+export const getProject = async (id: number): Promise<ProjectWithTeam> => {
     const response = await api.get(`/projects/${id}`);
     return response.data;
 };

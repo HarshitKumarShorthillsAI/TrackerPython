@@ -21,7 +21,7 @@ import {
 import { Add, Edit, Delete, Person } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import { User, UserRole } from '../types';
+import { User, UserRole } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
 
 interface UserFormData {

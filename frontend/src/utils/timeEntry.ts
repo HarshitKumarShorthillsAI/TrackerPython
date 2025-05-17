@@ -1,4 +1,4 @@
-import { TimeEntry } from '../types';
+import { TimeEntry } from '../types/index';
 import { parseISO, differenceInMinutes } from 'date-fns';
 
 export const calculateDuration = (timeEntry: TimeEntry): string => {

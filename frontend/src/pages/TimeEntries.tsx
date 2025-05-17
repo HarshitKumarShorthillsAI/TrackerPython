@@ -48,7 +48,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
 import { format, differenceInHours, differenceInMinutes, parseISO } from 'date-fns';
-import { TimeEntry, TimeEntryStatus, Task, Project, UserRole } from '../types';
+import { TimeEntry, TimeEntryStatus, Task, Project, UserRole } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
@@ -250,7 +250,7 @@ export const TimeEntries = () => {
         if (!projects) return [];
         
         // The backend API already filters projects based on user permissions
-        // No need for additional filtering in the frontend
+        // and team membership, so we can use the projects list directly
         return projects;
     }, [projects]);
 

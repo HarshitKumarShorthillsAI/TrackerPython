@@ -60,6 +60,10 @@ export interface Project {
     team_members: number[];
 }
 
+export interface ProjectWithTeam extends Omit<Project, 'team_members'> {
+    team_members: User[];
+}
+
 export interface Task {
     id: number;
     title: string;
@@ -126,4 +130,24 @@ interface UserFormData {
     hourly_rate?: number;
     role: UserRole;
     is_active: boolean;
+}
+
+export interface ProjectCreate {
+    name: string;
+    description?: string;
+    status: ProjectStatus;
+    budget_hours: number;
+    hourly_rate: number;
+    manager_id?: number | null;
+    team_members?: number[];
+}
+
+export interface ProjectUpdate {
+    name?: string;
+    description?: string;
+    status?: ProjectStatus;
+    budget_hours?: number;
+    hourly_rate?: number;
+    manager_id?: number | null;
+    team_members?: number[];
 } 

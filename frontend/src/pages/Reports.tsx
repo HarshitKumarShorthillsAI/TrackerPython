@@ -29,7 +29,7 @@ import { format } from 'date-fns';
 import { Download } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useSnackbar } from 'notistack';
-import { TimeEntry } from '../types';
+import { TimeEntry } from '../types/index';
 
 export const Reports = () => {
     const [selectedUser, setSelectedUser] = useState<number | ''>('');

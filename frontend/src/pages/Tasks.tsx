@@ -17,11 +17,13 @@ import {
     FormControl,
     InputLabel,
     Chip,
+    Alert,
+    CircularProgress,
 } from '@mui/material';
 import { Add, Edit, Delete, Person } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import { Task, TaskStatus, TaskPriority, Project, User, UserRole } from '../types';
+import { Task, TaskStatus, TaskPriority, Project, User, UserRole } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 
@@ -39,6 +41,7 @@ interface TaskFormData {
 export const Tasks = () => {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
+    const [selectedProjectDetails, setSelectedProjectDetails] = useState<Project | null>(null);
     const [formData, setFormData] = useState<TaskFormData>({
         title: '',
         description: '',
@@ -194,26 +197,28 @@ export const Tasks = () => {
     };
 
     const getAvailableTeamMembers = () => {
-        return employees || [];
+        if (!formData.project_id || !selectedProjectDetails) {
+            return [];
+        }
+        return selectedProjectDetails.team_members || [];
     };
 
     const handleProjectChange = async (projectId: number) => {
-        setFormData({
-            ...formData,
+        setFormData(prev => ({
+            ...prev,
             project_id: projectId,
-            assigned_to_id: undefined
-        });
+            assigned_to_id: undefined // Reset assigned user when project changes
+        }));
 
         if (projectId) {
             try {
                 const projectDetails = await api.getProject(projectId);
-                const selectedProject = projects?.find(p => p.id === projectId);
-                if (selectedProject) {
-                    selectedProject.team_members = projectDetails.team_members;
-                }
+                setSelectedProjectDetails(projectDetails);
             } catch (error) {
                 console.error('Error fetching project details:', error);
             }
+        } else {
+            setSelectedProjectDetails(null);
         }
     };
 

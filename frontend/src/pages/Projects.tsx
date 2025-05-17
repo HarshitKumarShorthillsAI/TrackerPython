@@ -22,8 +22,9 @@ import {
 import { Add, Edit, Delete, Group } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import { Project, ProjectStatus, User } from '../types';
+import { Project, ProjectCreate, ProjectUpdate, ProjectStatus, User } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
+import { useSnackbar } from 'notistack';
 
 interface ProjectFormData {
     name: string;
@@ -52,6 +53,7 @@ export const Projects = () => {
 
     const queryClient = useQueryClient();
     const { user, isManager } = useAuth();
+    const { enqueueSnackbar } = useSnackbar();
 
     const { data: projects } = useQuery({
         queryKey: ['projects'],
@@ -63,27 +65,27 @@ export const Projects = () => {
     });
 
     const createMutation = useMutation({
-        mutationFn: api.createProject,
+        mutationFn: (data: ProjectCreate) => api.createProject(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             handleCloseDialog();
         },
         onError: (error: any) => {
-            console.error('Error creating project:', error);
-            alert('Failed to create project. Please try again.');
+            console.error('Error creating project:', error.response?.data);
+            enqueueSnackbar(error.response?.data?.detail || 'Failed to create project. Please try again.', { variant: 'error' });
         }
     });
 
     const updateMutation = useMutation({
-        mutationFn: (data: { id: number; project: Partial<Project> }) =>
+        mutationFn: (data: { id: number; project: ProjectUpdate }) =>
             api.updateProject(data.id, data.project),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             handleCloseDialog();
         },
         onError: (error: any) => {
-            console.error('Error updating project:', error);
-            alert('Failed to update project. Please try again.');
+            console.error('Error updating project:', error.response?.data);
+            enqueueSnackbar(error.response?.data?.detail || 'Failed to update project. Please try again.', { variant: 'error' });
         }
     });
 
@@ -135,29 +137,39 @@ export const Projects = () => {
 
     const handleSubmit = () => {
         if (!formData.name) {
-            alert('Project name is required');
+            enqueueSnackbar('Project name is required', { variant: 'error' });
             return;
         }
 
-        const projectData = {
-            name: formData.name,
-            description: formData.description,
-            status: formData.status,
-            budget_hours: Number(formData.budget_hours),
-            hourly_rate: Number(formData.hourly_rate),
-            manager_id: formData.manager_id || null,
-            team_members: formData.team_members || []
-        };
-
         if (editingProject) {
+            // For updates, include team members
+            const updateData: ProjectUpdate = {
+                name: formData.name,
+                description: formData.description || undefined,
+                status: formData.status,
+                budget_hours: Number(formData.budget_hours),
+                hourly_rate: Number(formData.hourly_rate),
+                manager_id: formData.manager_id || null,
+                team_members: formData.team_members
+            };
+
             updateMutation.mutate({
                 id: editingProject.id,
-                project: projectData
+                project: updateData
             });
         } else {
-            createMutation.mutate(projectData);
+            // For creation, exclude team members
+            const createData: ProjectCreate = {
+                name: formData.name,
+                description: formData.description || undefined,
+                status: formData.status,
+                budget_hours: Number(formData.budget_hours),
+                hourly_rate: Number(formData.hourly_rate),
+                manager_id: formData.manager_id || null
+            };
+
+            createMutation.mutate(createData);
         }
-        handleCloseDialog();
     };
 
     const handleOpenTeamDialog = async (project: Project) => {
@@ -167,7 +179,7 @@ export const Projects = () => {
             setTeamDialogOpen(true);
         } catch (error) {
             console.error('Error fetching project details:', error);
-            alert('Failed to fetch project details. Please try again.');
+            enqueueSnackbar('Failed to fetch project details. Please try again.', { variant: 'error' });
         }
     };
 
