@@ -1,7 +1,6 @@
 from typing import Any, Dict, Optional, Union, List
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, or_, func
 from datetime import datetime
 
 from app.crud.base import CRUDBase
@@ -14,9 +13,16 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
     def get_multi_by_user(
         self, db: Session, *, user_id: int, skip: int = 0, limit: int = 100,
         status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
-        task_id: Optional[int] = None, billable_only: bool = False
+        task_id: Optional[int] = None, billable_only: bool = False,
+        start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> List[TimeEntry]:
-        query = db.query(self.model).filter(TimeEntry.user_id == user_id)
+        """Get time entries for a specific user"""
+        query = db.query(self.model).options(
+            joinedload(TimeEntry.user),
+            joinedload(TimeEntry.project),
+            joinedload(TimeEntry.task)
+        ).filter(TimeEntry.user_id == user_id)
+        
         if status:
             query = query.filter(TimeEntry.status == status)
         if project_id:
@@ -25,29 +31,28 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
             query = query.filter(TimeEntry.task_id == task_id)
         if billable_only:
             query = query.filter(TimeEntry.billable == True)
-        return query.offset(skip).limit(limit).all()
+        if start_date:
+            query = query.filter(func.date(TimeEntry.start_time) >= start_date.date())
+        if end_date:
+            query = query.filter(func.date(TimeEntry.start_time) <= end_date.date())
+            
+        return query.order_by(TimeEntry.start_time.desc()).offset(skip).limit(limit).all()
 
     def get_multi_by_manager(
         self, db: Session, *, manager_id: int, skip: int = 0, limit: int = 100,
         status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
-        task_id: Optional[int] = None, billable_only: bool = False
+        task_id: Optional[int] = None, billable_only: bool = False,
+        start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> List[TimeEntry]:
-        # Get the user to check their role
-        user = db.query(User).filter(User.id == manager_id).first()
+        """Get time entries for projects managed by a specific manager"""
+        # Get projects managed by the user
+        managed_projects = db.query(Project.id).filter(Project.manager_id == manager_id)
         
-        # Base query with eager loading of project relationship
         query = db.query(self.model).options(
-            joinedload(TimeEntry.project)  # Eager load project relationship
-        )
-        
-        # If user has MANAGER role, they can see all time entries
-        # Otherwise, only show time entries for projects they manage
-        if user.role != UserRole.MANAGER:
-            managed_project_ids = db.query(Project.id).filter(
-                Project.manager_id == manager_id
-            ).all()
-            managed_project_ids = [p[0] for p in managed_project_ids]
-            query = query.filter(TimeEntry.project_id.in_(managed_project_ids))
+            joinedload(TimeEntry.user),
+            joinedload(TimeEntry.project),
+            joinedload(TimeEntry.task)
+        ).filter(TimeEntry.project_id.in_(managed_projects))
         
         if status:
             query = query.filter(TimeEntry.status == status)
@@ -57,7 +62,12 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
             query = query.filter(TimeEntry.task_id == task_id)
         if billable_only:
             query = query.filter(TimeEntry.billable == True)
-        return query.offset(skip).limit(limit).all()
+        if start_date:
+            query = query.filter(func.date(TimeEntry.start_time) >= start_date.date())
+        if end_date:
+            query = query.filter(func.date(TimeEntry.start_time) <= end_date.date())
+        
+        return query.order_by(TimeEntry.start_time.desc()).offset(skip).limit(limit).all()
 
     def create_with_owner(
         self, db: Session, *, obj_in: Union[TimeEntryCreate, dict], user_id: int
