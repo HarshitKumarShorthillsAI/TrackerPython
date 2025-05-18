@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>Time Entry Report</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+        }
+        .summary-card {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .summary-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .summary-value {
+            font-size: 24px;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h2 style="color: #2c3e50;">Time Entry Report</h2>
+        
+        <p>Hello,</p>
+        
+        <p>Here is the time entry report for the period {{ start_date }} to {{ end_date }}.</p>
+        
+        {% if comment %}
+        <p><strong>Comment:</strong> {{ comment }}</p>
+        {% endif %}
+
+        <h3>Summary</h3>
+        <div style="display: flex; gap: 20px;">
+            <div class="summary-card">
+                <div class="summary-title">Total Hours</div>
+                <div class="summary-value">{{ total_hours }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-title">Projects Worked On</div>
+                <div class="summary-value">{{ total_projects }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-title">Total Tasks</div>
+                <div class="summary-value">{{ total_tasks }}</div>
+            </div>
+        </div>
+
+        <h3>Time Entries</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Project</th>
+                    <th>Task</th>
+                    <th>Description</th>
+                    <th>Hours</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr>
+                    <td>{{ entry.date }}</td>
+                    <td>{{ entry.project }}</td>
+                    <td>{{ entry.task }}</td>
+                    <td>{{ entry.description }}</td>
+                    <td>{{ entry.hours }}</td>
+                    <td>{{ entry.status }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <p>Best regards,<br/>
+        {{ project_name }} Team</p>
+    </div>
+</body>
+</html> 

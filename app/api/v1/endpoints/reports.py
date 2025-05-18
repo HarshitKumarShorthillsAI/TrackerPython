@@ -8,7 +8,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from io import BytesIO
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+from pathlib import Path
 
 from app.api import deps
 from app.crud.crud_time_entry import crud_time_entry
@@ -17,6 +18,8 @@ from app.crud.crud_task import task as crud_task
 from app.models.user import User, UserRole
 from app.models.time_entry import TimeEntry, TimeEntryStatus
 from app.models.project import Project
+from app.utils import send_email
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -27,6 +30,16 @@ class GenerateReportRequest(BaseModel):
     project_id: Optional[int] = None
     task_id: Optional[int] = None
     status: Optional[TimeEntryStatus] = None
+
+class SendReportEmailRequest(BaseModel):
+    start_date: str
+    end_date: str
+    user_id: Optional[int] = None
+    project_id: Optional[int] = None
+    task_id: Optional[int] = None
+    status: Optional[TimeEntryStatus] = None
+    email_to: EmailStr
+    comment: Optional[str] = None
 
 def create_pdf_report(
     time_entries: list[TimeEntry],
@@ -285,4 +298,154 @@ async def generate_report(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to generate report: {str(e)}"
+        )
+
+@router.post("/send-email")
+async def send_report_email(
+    *,
+    request: SendReportEmailRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Send a time entries report via email."""
+    try:
+        # Convert string dates to Python date objects
+        try:
+            start = datetime.strptime(request.start_date, '%Y-%m-%d').date()
+            end = datetime.strptime(request.end_date, '%Y-%m-%d').date()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid date format. Dates must be in YYYY-MM-DD format. Error: {str(e)}"
+            )
+
+        # Check permissions
+        if request.user_id and request.user_id != current_user.id:
+            if not (current_user.is_superuser or current_user.role == UserRole.MANAGER):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not enough permissions to send report for other users"
+                )
+
+        # Get time entries (reuse existing logic)
+        query = db.query(TimeEntry).options(
+            joinedload(TimeEntry.user),
+            joinedload(TimeEntry.project),
+            joinedload(TimeEntry.task)
+        )
+
+        # Apply date filters using func.date to compare only dates
+        query = query.filter(
+            func.date(TimeEntry.start_time) >= start,
+            func.date(TimeEntry.start_time) <= end
+        )
+
+        # Apply user and project filters
+        if request.user_id:
+            query = query.filter(TimeEntry.user_id == request.user_id)
+        else:
+            if not current_user.is_superuser:
+                query = query.filter(TimeEntry.user_id == current_user.id)
+
+        if request.project_id:
+            query = query.filter(TimeEntry.project_id == request.project_id)
+            # If user is a manager, verify they manage this project
+            if current_user.role == UserRole.MANAGER:
+                project = db.query(Project).filter(
+                    Project.id == request.project_id,
+                    Project.manager_id == current_user.id
+                ).first()
+                if not project:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Not authorized to access this project's time entries"
+                    )
+
+        # Apply task filter
+        if request.task_id:
+            query = query.filter(TimeEntry.task_id == request.task_id)
+
+        # Apply status filter
+        if request.status:
+            query = query.filter(TimeEntry.status == request.status)
+
+        # Get the time entries
+        time_entries = query.order_by(TimeEntry.start_time.desc()).all()
+
+        if not time_entries:
+            raise HTTPException(
+                status_code=404,
+                detail="No time entries found for the selected criteria"
+            )
+
+        # Calculate summary statistics
+        total_hours = 0
+        entries_data = []
+        
+        for entry in time_entries:
+            project_name = "Unknown"
+            task_title = "Unknown"
+            
+            if entry.project:
+                project_name = entry.project.name
+            
+            if entry.task:
+                task_title = entry.task.title
+            
+            hours = 0
+            if entry.end_time and entry.start_time:
+                try:
+                    duration = (entry.end_time - entry.start_time).total_seconds() / 3600
+                    hours = duration
+                    total_hours += hours
+                except (ValueError, TypeError):
+                    hours = 0
+
+            entries_data.append({
+                "date": entry.start_time.strftime('%Y-%m-%d'),
+                "project": project_name,
+                "task": task_title,
+                "description": entry.description or "-",
+                "hours": f"{hours:.2f}",
+                "status": entry.status.value if entry.status else "-"
+            })
+
+        unique_projects = len(set(entry.project_id for entry in time_entries))
+        unique_tasks = len(set(entry.task_id for entry in time_entries))
+
+        # Read email template
+        template_path = Path(settings.EMAIL_TEMPLATES_DIR) / "report.html"
+        with open(template_path) as f:
+            template_str = f.read()
+
+        # Send email with report content
+        try:
+            send_email(
+                email_to=request.email_to,
+                subject_template=f"Time Entry Report: {request.start_date} to {request.end_date}",
+                html_template=template_str,
+                environment={
+                    "project_name": settings.PROJECT_NAME,
+                    "start_date": request.start_date,
+                    "end_date": request.end_date,
+                    "comment": request.comment,
+                    "total_hours": f"{total_hours:.2f}",
+                    "total_projects": unique_projects,
+                    "total_tasks": unique_tasks,
+                    "entries": entries_data
+                }
+            )
+            return {"message": "Report sent successfully"}
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send email: {str(e)}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send report: {str(e)}"
         ) 
