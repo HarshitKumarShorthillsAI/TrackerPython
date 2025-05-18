@@ -19,6 +19,11 @@ import {
     Paper,
     Alert,
     CircularProgress,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    TextField,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -26,7 +31,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../services/api';
 import { format, parseISO, startOfDay } from 'date-fns';
-import { Download } from '@mui/icons-material';
+import { Download, Email } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useSnackbar } from 'notistack';
 import { TimeEntry, Task, ProjectWithTeam, UserRole, User, TimeEntryStatus } from '../types/index';
@@ -39,6 +44,10 @@ export const Reports = () => {
     const [startDate, setStartDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+    const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
+    const [emailTo, setEmailTo] = useState('');
+    const [emailComment, setEmailComment] = useState('');
+    const [isSendingEmail, setIsSendingEmail] = useState(false);
     const { user, isManager } = useAuth();
     const { enqueueSnackbar } = useSnackbar();
 
@@ -216,6 +225,50 @@ export const Reports = () => {
         }
     };
 
+    const handleSendEmail = async () => {
+        if (!startDate || !endDate) {
+            enqueueSnackbar('Please select both start and end dates', { variant: 'error' });
+            return;
+        }
+
+        if (!emailTo) {
+            enqueueSnackbar('Please enter an email address', { variant: 'error' });
+            return;
+        }
+
+        setIsSendingEmail(true);
+        
+        try {
+            // Ensure dates are properly formatted
+            const formattedStartDate = format(startDate, 'yyyy-MM-dd');
+            const formattedEndDate = format(endDate, 'yyyy-MM-dd');
+            
+            // Create a payload with proper types
+            const payload = {
+                start_date: formattedStartDate,
+                end_date: formattedEndDate,
+                user_id: selectedUser ? Number(selectedUser) : undefined,
+                project_id: selectedProject ? Number(selectedProject) : undefined,
+                task_id: selectedTask ? Number(selectedTask) : undefined,
+                status: selectedStatus || undefined,
+                email_to: emailTo,
+                comment: emailComment || undefined
+            };
+
+            await api.sendReportEmail(payload);
+            
+            enqueueSnackbar('Report sent successfully', { variant: 'success' });
+            setIsEmailDialogOpen(false);
+            setEmailTo('');
+            setEmailComment('');
+        } catch (error: any) {
+            console.error('Error sending report:', error);
+            enqueueSnackbar(error.message || 'Failed to send report', { variant: 'error' });
+        } finally {
+            setIsSendingEmail(false);
+        }
+    };
+
     const summary = calculateSummary();
 
     return (
@@ -360,14 +413,25 @@ export const Reports = () => {
 
                     <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="h5">Time Entries</Typography>
-                        <Button
-                            variant="contained"
-                            startIcon={<Download />}
-                            onClick={handleGenerateReport}
-                            disabled={!startDate || !endDate || isGeneratingReport}
-                        >
-                            {isGeneratingReport ? 'Generating...' : 'Download Report'}
-                        </Button>
+                        <Box>
+                            <Button
+                                variant="contained"
+                                startIcon={<Email />}
+                                onClick={() => setIsEmailDialogOpen(true)}
+                                disabled={!startDate || !endDate}
+                                sx={{ mr: 1 }}
+                            >
+                                Email Report
+                            </Button>
+                            <Button
+                                variant="contained"
+                                startIcon={<Download />}
+                                onClick={handleGenerateReport}
+                                disabled={!startDate || !endDate || isGeneratingReport}
+                            >
+                                {isGeneratingReport ? 'Generating...' : 'Download Report'}
+                            </Button>
+                        </Box>
                     </Box>
 
                     {isLoading ? (
@@ -417,6 +481,42 @@ export const Reports = () => {
                     )}
                 </>
             )}
+
+            <Dialog open={isEmailDialogOpen} onClose={() => setIsEmailDialogOpen(false)}>
+                <DialogTitle>Send Report via Email</DialogTitle>
+                <DialogContent>
+                    <Box sx={{ pt: 2 }}>
+                        <TextField
+                            fullWidth
+                            label="Email To"
+                            type="email"
+                            value={emailTo}
+                            onChange={(e) => setEmailTo(e.target.value)}
+                            margin="normal"
+                            required
+                        />
+                        <TextField
+                            fullWidth
+                            label="Comment (Optional)"
+                            multiline
+                            rows={4}
+                            value={emailComment}
+                            onChange={(e) => setEmailComment(e.target.value)}
+                            margin="normal"
+                        />
+                    </Box>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setIsEmailDialogOpen(false)}>Cancel</Button>
+                    <Button 
+                        onClick={handleSendEmail}
+                        variant="contained"
+                        disabled={isSendingEmail || !emailTo}
+                    >
+                        {isSendingEmail ? 'Sending...' : 'Send'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 };

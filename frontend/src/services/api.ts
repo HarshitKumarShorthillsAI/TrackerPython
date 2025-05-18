@@ -237,4 +237,22 @@ export const generateReport = async (params: ReportParams) => {
             
         throw new Error(errorMessage);
     }
+};
+
+export interface SendReportEmailParams extends ReportParams {
+    email_to: string;
+    comment?: string;
+}
+
+export const sendReportEmail = async (params: SendReportEmailParams) => {
+    try {
+        const response = await api.post('/reports/send-email', params);
+        return response.data;
+    } catch (error: any) {
+        const errorMessage = error.response?.data?.detail 
+            || error.response?.data?.message 
+            || error.message 
+            || 'Failed to send report';
+        throw new Error(errorMessage);
+    }
 }; 
