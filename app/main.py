@@ -20,13 +20,22 @@ app = FastAPI(
     redoc_url=None  # Disable default redoc
 )
 
-# Set all CORS enabled origins
+# Configure CORS
+origins = [
+    "http://localhost:5173",    # Vite dev server
+    "http://localhost:5174",    # Vite preview
+    "http://localhost:8010",    # Backend API
+    "http://0.0.0.0:8010",     # Backend API alternative
+    "http://127.0.0.1:8010",   # Backend API alternative
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.get("/docs", include_in_schema=False)
@@ -36,4 +45,8 @@ async def custom_swagger_ui_html():
         title=f"{settings.PROJECT_NAME} - Swagger UI"
     )
 
-app.include_router(api_router, prefix=settings.API_V1_STR) 
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+@app.get("/")
+def root():
+    return {"message": "Welcome to Time Tracking API"} 

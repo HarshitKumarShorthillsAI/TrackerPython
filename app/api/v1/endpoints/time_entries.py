@@ -229,4 +229,33 @@ def mark_time_entry_billed(
         time_entry = crud_time_entry.mark_billed(db=db, time_entry=time_entry)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return time_entry 
+    return time_entry
+
+@router.delete("/{time_entry_id}", status_code=204)
+def delete_time_entry(
+    *,
+    db: Session = Depends(deps.get_db),
+    time_entry_id: int,
+    current_user: User = Depends(deps.get_current_user)
+) -> None:
+    """Delete a time entry. Only draft entries can be deleted by their owners."""
+    time_entry = crud_time_entry.get(db=db, id=time_entry_id)
+    if not time_entry:
+        raise HTTPException(status_code=404, detail="Time entry not found")
+    
+    # Only allow deletion of draft entries
+    if time_entry.status != TimeEntryStatus.DRAFT:
+        raise HTTPException(
+            status_code=400,
+            detail="Only draft time entries can be deleted"
+        )
+    
+    # Check if user owns the entry or is a superuser
+    if not current_user.is_superuser and time_entry.user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Not enough permissions"
+        )
+    
+    crud_time_entry.remove(db=db, id=time_entry_id)
+    return None 

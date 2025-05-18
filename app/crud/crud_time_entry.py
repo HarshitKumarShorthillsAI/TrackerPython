@@ -7,9 +7,37 @@ from app.crud.base import CRUDBase
 from app.models.time_entry import TimeEntry, TimeEntryStatus
 from app.models.user import User, UserRole
 from app.models.project import Project
+from app.models.project_team_members import project_team_members
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryUpdate
 
 class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
+    def get_multi(
+        self, db: Session, *, skip: int = 0, limit: int = 100,
+        status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
+        task_id: Optional[int] = None, billable_only: bool = False,
+        start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
+    ) -> List[TimeEntry]:
+        query = db.query(self.model).options(
+            joinedload(TimeEntry.user),
+            joinedload(TimeEntry.project),
+            joinedload(TimeEntry.task)
+        )
+        
+        if status:
+            query = query.filter(TimeEntry.status == status)
+        if project_id:
+            query = query.filter(TimeEntry.project_id == project_id)
+        if task_id:
+            query = query.filter(TimeEntry.task_id == task_id)
+        if billable_only:
+            query = query.filter(TimeEntry.billable == True)
+        if start_date:
+            query = query.filter(TimeEntry.start_time >= start_date)
+        if end_date:
+            query = query.filter(TimeEntry.start_time <= end_date)
+            
+        return query.offset(skip).limit(limit).all()
+
     def get_multi_by_user(
         self, db: Session, *, user_id: int, skip: int = 0, limit: int = 100,
         status: Optional[TimeEntryStatus] = None, project_id: Optional[int] = None,
@@ -35,7 +63,7 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
             query = query.filter(func.date(TimeEntry.start_time) >= start_date.date())
         if end_date:
             query = query.filter(func.date(TimeEntry.start_time) <= end_date.date())
-            
+        
         return query.order_by(TimeEntry.start_time.desc()).offset(skip).limit(limit).all()
 
     def get_multi_by_manager(
@@ -91,20 +119,26 @@ class CRUDTimeEntry(CRUDBase[TimeEntry, TimeEntryCreate, TimeEntryUpdate]):
     def update(
         self, db: Session, *, db_obj: TimeEntry, obj_in: Union[TimeEntryUpdate, Dict[str, Any]]
     ) -> TimeEntry:
+        """Update a time entry."""
         if isinstance(obj_in, dict):
             update_data = obj_in
         else:
             update_data = obj_in.dict(exclude_unset=True)
-            
-        # If end_time is being set, calculate duration and update status
-        if "end_time" in update_data:
-            end_time = datetime.fromisoformat(update_data["end_time"].replace("Z", "+00:00"))
-            start_time = db_obj.start_time
-            duration = (end_time - start_time).total_seconds() / 3600  # Convert to hours
-            
-            # Update the status to SUBMITTED when timer is stopped
-            update_data["status"] = TimeEntryStatus.SUBMITTED
-            
+
+        # Convert end_time string to datetime if present
+        if "end_time" in update_data and update_data["end_time"]:
+            try:
+                if isinstance(update_data["end_time"], str):
+                    # Handle ISO format with Z
+                    end_time_str = update_data["end_time"]
+                    if end_time_str.endswith('Z'):
+                        end_time_str = end_time_str[:-1] + '+00:00'
+                    update_data["end_time"] = datetime.fromisoformat(end_time_str)
+            except Exception as e:
+                print(f"Error parsing end_time: {e}")
+                raise ValueError(f"Invalid end_time format: {update_data['end_time']}")
+
+        # Update the object using parent class method
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 
     def get_multi_by_owner(
