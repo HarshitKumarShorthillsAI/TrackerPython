@@ -12,6 +12,8 @@ import { Projects } from './pages/Projects';
 import { Tasks } from './pages/Tasks';
 import { Users } from './pages/Users';
 import { Reports } from './pages/Reports';
+import MonthlyQuotas from './pages/MonthlyQuotas';
+import { UserRole } from './types';
 
 const queryClient = new QueryClient();
 
@@ -64,6 +66,7 @@ const App = () => {
                                         <Route path="tasks" element={<Tasks />} />
                                         <Route path="reports" element={<Reports />} />
                                         <Route path="users" element={<Users />} />
+                                        <Route path="monthly-quotas" element={<MonthlyQuotas />} />
                                     </Route>
                                 </Routes>
                             </BrowserRouter>

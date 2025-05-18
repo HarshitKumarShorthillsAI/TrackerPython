@@ -57,6 +57,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useSnackbar } from 'notistack';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
+import { monthlyQuotasApi, MonthlyQuota } from '../services/monthlyQuotas';
 
 // Utility functions
 const calculateDuration = (entry: TimeEntry): string => {
@@ -220,6 +221,7 @@ export const TimeEntries = () => {
         endDate: null
     });
     const [statusFilter, setStatusFilter] = useState<TimeEntryStatus | 'ALL'>('ALL');
+    const [currentMonthQuota, setCurrentMonthQuota] = useState<MonthlyQuota | null>(null);
     
     const queryClient = useQueryClient();
     const { user } = useAuth();
@@ -844,6 +846,59 @@ export const TimeEntries = () => {
         };
     }, [timeEntries, user?.id]);
 
+    // Add query for monthly quota
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = (currentDate.getMonth() + 1).toString().padStart(2, '0');
+    
+    // Fetch current month's quota
+    useEffect(() => {
+        const fetchCurrentMonthQuota = async () => {
+            try {
+                const monthStr = `${currentYear}-${currentMonth}`;
+                const quota = await monthlyQuotasApi.getByMonth(monthStr);
+                setCurrentMonthQuota(quota);
+            } catch (error) {
+                console.error('Error fetching monthly quota:', error);
+            }
+        };
+        
+        if (user?.id) {
+            fetchCurrentMonthQuota();
+        }
+    }, [user?.id, currentYear, currentMonth]);
+
+    // Calculate remaining hours for the month
+    const calculateRemainingHours = () => {
+        if (!currentMonthQuota || !timeEntries) return null;
+
+        const monthStart = new Date(currentYear, currentDate.getMonth(), 1);
+        const monthEnd = new Date(currentYear, currentDate.getMonth() + 1, 0);
+        
+        // Calculate total hours worked this month
+        const monthlyWorkedHours = timeEntries.reduce((total, entry) => {
+            if (!entry.end_time) return total;
+            const start = parseISO(entry.start_time);
+            const end = parseISO(entry.end_time);
+            
+            // Only count if the entry is in the current month
+            if (isWithinInterval(start, { start: monthStart, end: monthEnd }) ||
+                isWithinInterval(end, { start: monthStart, end: monthEnd })) {
+                const hours = differenceInMinutes(end, start) / 60;
+                return total + hours;
+            }
+            return total;
+        }, 0);
+
+        return {
+            totalQuota: currentMonthQuota.monthly_hours,
+            workedHours: monthlyWorkedHours,
+            remainingHours: currentMonthQuota.monthly_hours - monthlyWorkedHours
+        };
+    };
+
+    const monthlyStats = calculateRemainingHours();
+
     if (isInitialLoading || !isDataReady) {
         return (
             <Container maxWidth="xl">
@@ -925,7 +980,7 @@ export const TimeEntries = () => {
 
                 {/* Add Time Summary Cards */}
                 <Grid container spacing={3} sx={{ mb: 3 }}>
-                    <Grid item xs={12} sm={6}>
+                    <Grid item xs={12} sm={6} md={3}>
                         <Card>
                             <CardContent>
                                 <Typography variant="h6" color="textSecondary" gutterBottom>
@@ -940,17 +995,47 @@ export const TimeEntries = () => {
                             </CardContent>
                         </Card>
                     </Grid>
-                    <Grid item xs={12} sm={6}>
+                    <Grid item xs={12} sm={6} md={3}>
                         <Card>
                             <CardContent>
                                 <Typography variant="h6" color="textSecondary" gutterBottom>
-                                    This Week's Hours
+                                    Weekly Hours
                                 </Typography>
                                 <Typography variant="h3">
                                     {weeklyHours.toFixed(2)}
                                 </Typography>
                                 <Typography variant="body2" color="textSecondary">
-                                    Week of {format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'MMM d')} - {format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'MMM d')}
+                                    Current Week
+                                </Typography>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <Card>
+                            <CardContent>
+                                <Typography variant="h6" color="textSecondary" gutterBottom>
+                                    Monthly Hours
+                                </Typography>
+                                <Typography variant="h3">
+                                    {monthlyStats?.workedHours.toFixed(2) || '0.00'}
+                                </Typography>
+                                <Typography variant="body2" color="textSecondary">
+                                    {format(new Date(), 'MMMM yyyy')}
+                                </Typography>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <Card>
+                            <CardContent>
+                                <Typography variant="h6" color="textSecondary" gutterBottom>
+                                    Monthly Quota Remaining
+                                </Typography>
+                                <Typography variant="h3" color={monthlyStats?.remainingHours && monthlyStats.remainingHours < 0 ? 'error' : 'inherit'}>
+                                    {monthlyStats?.remainingHours?.toFixed(2) || 'N/A'}
+                                </Typography>
+                                <Typography variant="body2" color="textSecondary">
+                                    Quota: {monthlyStats?.totalQuota || 'Not Set'} hours
                                 </Typography>
                             </CardContent>
                         </Card>

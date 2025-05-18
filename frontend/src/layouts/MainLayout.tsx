@@ -1,8 +1,9 @@
 import React from 'react';
 import { AppBar, Box, CssBaseline, Drawer, IconButton, List, ListItem, ListItemIcon, ListItemText, Toolbar, Typography } from '@mui/material';
-import { Menu as MenuIcon, Timer, Assignment, FolderOpen, People, Logout, Assessment } from '@mui/icons-material';
+import { Menu as MenuIcon, Timer, Assignment, FolderOpen, People, Logout, Assessment, CalendarMonth } from '@mui/icons-material';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { UserRole } from '../types';
 
 const drawerWidth = 240;
 
@@ -10,6 +11,8 @@ export const MainLayout = () => {
     const [mobileOpen, setMobileOpen] = React.useState(false);
     const { user, logout, isAdmin } = useAuth();
     const navigate = useNavigate();
+
+    const isManagerOrAdmin = user?.role === UserRole.MANAGER || isAdmin();
 
     const menuItems = [
         { text: 'Time Entries', icon: <Timer />, path: '/time-entries' },
@@ -20,6 +23,10 @@ export const MainLayout = () => {
 
     if (isAdmin()) {
         menuItems.push({ text: 'Users', icon: <People />, path: '/users' });
+    }
+
+    if (isManagerOrAdmin) {
+        menuItems.push({ text: 'Monthly Quotas', icon: <CalendarMonth />, path: '/monthly-quotas' });
     }
 
     const drawer = (
