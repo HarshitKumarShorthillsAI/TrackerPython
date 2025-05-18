@@ -10,4 +10,4 @@ api_router.include_router(projects.router, prefix="/projects", tags=["projects"]
 api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(time_entries.router, prefix="/time-entries", tags=["time-entries"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
-api_router.include_router(monthly_quotas.router, prefix="/monthly-quotas", tags=["monthly-quotas"]) 
+api_router.include_router(monthly_quotas.router, prefix="/monthly-quotas", tags=["monthly-quotas"])
