@@ -48,13 +48,15 @@ import {
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import { format, differenceInHours, differenceInMinutes, parseISO } from 'date-fns';
+import { format, differenceInHours, differenceInMinutes, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { TimeEntry, TimeEntryStatus, Task, Project, UserRole, ProjectWithTeam, User } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useSnackbar } from 'notistack';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 
 // Utility functions
 const calculateDuration = (entry: TimeEntry): string => {
@@ -199,6 +201,7 @@ export const TimeEntries = () => {
     const [selectedProject, setSelectedProject] = useState<number | null>(null);
     const [selectedTask, setSelectedTask] = useState<number | null>(null);
     const [description, setDescription] = useState('');
+    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [startTime, setStartTime] = useState<Date | null>(null);
     const [endTime, setEndTime] = useState<Date | null>(null);
     const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -584,6 +587,7 @@ export const TimeEntries = () => {
         setSelectedProject(null);
         setSelectedTask(null);
         setDescription('');
+        setSelectedDate(null);
         setStartTime(null);
         setEndTime(null);
         setError(null);
@@ -619,14 +623,32 @@ export const TimeEntries = () => {
             return;
         }
 
+        if (!selectedDate || !startTime || !endTime) {
+            setError('Please select date and times');
+            return;
+        }
+
+        // Combine date and times
+        const combinedStartTime = new Date(selectedDate);
+        combinedStartTime.setHours(startTime.getHours(), startTime.getMinutes());
+
+        const combinedEndTime = new Date(selectedDate);
+        combinedEndTime.setHours(endTime.getHours(), endTime.getMinutes());
+
+        // Validate that end time is after start time
+        if (combinedEndTime <= combinedStartTime) {
+            setError('End time must be after start time');
+            return;
+        }
+
         const selectedProjectData = projects?.find(p => p.id === selectedProject);
 
         try {
             await createMutation.mutateAsync({
                 task_id: selectedTask!,
                 project_id: selectedProject!,
-                start_time: startTime!.toISOString(),
-                end_time: endTime!.toISOString(),
+                start_time: combinedStartTime.toISOString(),
+                end_time: combinedEndTime.toISOString(),
                 description: description,
                 billable: true,
                 hourly_rate: selectedProjectData?.hourly_rate || user?.hourly_rate || 0
@@ -749,18 +771,7 @@ export const TimeEntries = () => {
                         </Select>
                     </FormControl>
                 )}
-                <LocalizationProvider dateAdapter={AdapterDateFns}>
-                    <DateTimePicker
-                        label="From Date"
-                        value={dateRange.startDate}
-                        onChange={(newValue) => setDateRange(prev => ({ ...prev, startDate: newValue }))}
-                    />
-                    <DateTimePicker
-                        label="To Date"
-                        value={dateRange.endDate}
-                        onChange={(newValue) => setDateRange(prev => ({ ...prev, endDate: newValue }))}
-                    />
-                </LocalizationProvider>
+                
             </Box>
             {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
                 <FormControlLabel
@@ -795,6 +806,43 @@ export const TimeEntries = () => {
     // Update the loading check to be more specific
     const isInitialLoading = isLoadingTimeEntries || isLoadingTasks || isLoadingProjects;
     const isDataReady = !!projects && !!tasks && !!timeEntries;
+
+    // Add function to calculate hours for a time range
+    const calculateHoursForTimeRange = (entries: TimeEntry[] | undefined, start: Date, end: Date): number => {
+        if (!entries) return 0;
+        
+        return entries.reduce((total, entry) => {
+            if (!entry.end_time) return total;
+            
+            const entryStart = parseISO(entry.start_time);
+            const entryEnd = parseISO(entry.end_time);
+            
+            // Check if entry falls within the time range
+            if (isWithinInterval(entryStart, { start, end }) || 
+                isWithinInterval(entryEnd, { start, end })) {
+                const hours = differenceInMinutes(entryEnd, entryStart) / 60;
+                return total + hours;
+            }
+            return total;
+        }, 0);
+    };
+
+    // Calculate daily and weekly hours
+    const { dailyHours, weeklyHours } = React.useMemo(() => {
+        const now = new Date();
+        const dayStart = startOfDay(now);
+        const dayEnd = endOfDay(now);
+        const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Week starts on Monday
+        const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+
+        // Filter entries for current user only
+        const userEntries = timeEntries?.filter(entry => entry.user_id === user?.id);
+        
+        return {
+            dailyHours: calculateHoursForTimeRange(userEntries, dayStart, dayEnd),
+            weeklyHours: calculateHoursForTimeRange(userEntries, weekStart, weekEnd)
+        };
+    }, [timeEntries, user?.id]);
 
     if (isInitialLoading || !isDataReady) {
         return (
@@ -874,6 +922,41 @@ export const TimeEntries = () => {
                 <Typography variant="h4" gutterBottom>
                     Time Entries
                 </Typography>
+
+                {/* Add Time Summary Cards */}
+                <Grid container spacing={3} sx={{ mb: 3 }}>
+                    <Grid item xs={12} sm={6}>
+                        <Card>
+                            <CardContent>
+                                <Typography variant="h6" color="textSecondary" gutterBottom>
+                                    Today's Hours
+                                </Typography>
+                                <Typography variant="h3">
+                                    {dailyHours.toFixed(2)}
+                                </Typography>
+                                <Typography variant="body2" color="textSecondary">
+                                    {format(new Date(), 'EEEE, MMMM d, yyyy')}
+                                </Typography>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                        <Card>
+                            <CardContent>
+                                <Typography variant="h6" color="textSecondary" gutterBottom>
+                                    This Week's Hours
+                                </Typography>
+                                <Typography variant="h3">
+                                    {weeklyHours.toFixed(2)}
+                                </Typography>
+                                <Typography variant="body2" color="textSecondary">
+                                    Week of {format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'MMM d')} - {format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'MMM d')}
+                                </Typography>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                </Grid>
+
                 {error && (
                     <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
                         {error}
@@ -890,7 +973,7 @@ export const TimeEntries = () => {
                                         value={selectedProject || ''}
                                         onChange={(e) => {
                                             setSelectedProject(e.target.value as number);
-                                            setSelectedTask(null); // Reset task when project changes
+                                            setSelectedTask(null);
                                         }}
                                         disabled={isLoadingProjects}
                                     >
@@ -904,16 +987,6 @@ export const TimeEntries = () => {
                                         ))}
                                     </Select>
                                 </FormControl>
-                                {isLoadingProjects && (
-                                    <Typography variant="caption" color="textSecondary">
-                                        Loading projects...
-                                    </Typography>
-                                )}
-                                {projectsError && (
-                                    <Typography variant="caption" color="error">
-                                        Error loading projects. Please try again.
-                                    </Typography>
-                                )}
                             </Grid>
                             <Grid item xs={12} sm={6} md={3}>
                                 <FormControl fullWidth>
@@ -933,11 +1006,6 @@ export const TimeEntries = () => {
                                         ))}
                                     </Select>
                                 </FormControl>
-                                {isLoadingTasks && (
-                                    <Typography variant="caption" color="textSecondary">
-                                        Loading tasks...
-                                    </Typography>
-                                )}
                             </Grid>
                             <Grid item xs={12} sm={6} md={3}>
                                 <TextField
@@ -952,7 +1020,17 @@ export const TimeEntries = () => {
                                 <>
                                     <Grid item xs={12} sm={6} md={3}>
                                         <LocalizationProvider dateAdapter={AdapterDateFns}>
-                                            <DateTimePicker
+                                            <DatePicker
+                                                label="Date"
+                                                value={selectedDate}
+                                                onChange={(newValue) => setSelectedDate(newValue)}
+                                                sx={{ width: '100%' }}
+                                            />
+                                        </LocalizationProvider>
+                                    </Grid>
+                                    <Grid item xs={12} sm={6} md={3}>
+                                        <LocalizationProvider dateAdapter={AdapterDateFns}>
+                                            <TimePicker
                                                 label="Start Time"
                                                 value={startTime}
                                                 onChange={(newValue) => setStartTime(newValue)}
@@ -962,7 +1040,7 @@ export const TimeEntries = () => {
                                     </Grid>
                                     <Grid item xs={12} sm={6} md={3}>
                                         <LocalizationProvider dateAdapter={AdapterDateFns}>
-                                            <DateTimePicker
+                                            <TimePicker
                                                 label="End Time"
                                                 value={endTime}
                                                 onChange={(newValue) => setEndTime(newValue)}
@@ -975,7 +1053,7 @@ export const TimeEntries = () => {
                                             variant="contained"
                                             color="primary"
                                             onClick={handleCreateTimeEntry}
-                                            disabled={!selectedProject || !selectedTask || !startTime || !endTime}
+                                            disabled={!selectedProject || !selectedTask || !selectedDate || !startTime || !endTime}
                                             fullWidth
                                         >
                                             Create Time Entry
@@ -1035,7 +1113,9 @@ export const TimeEntries = () => {
                             <TableCell>Start Time</TableCell>
                             <TableCell>End Time</TableCell>
                             <TableCell>Duration</TableCell>
-                            <TableCell>Cost</TableCell>
+                            {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                                <TableCell>Cost</TableCell>
+                            )}
                             <TableCell>Status</TableCell>
                             <TableCell>Actions</TableCell>
                         </TableRow>
@@ -1044,7 +1124,11 @@ export const TimeEntries = () => {
                         {!filteredTimeEntries?.length ? (
                             <TableRow>
                                 <TableCell 
-                                    colSpan={user?.is_superuser || user?.role === UserRole.MANAGER ? 10 : 9}
+                                    colSpan={
+                                        (user?.is_superuser || user?.role === UserRole.MANAGER) 
+                                            ? 10 
+                                            : 8
+                                    }
                                     align="center"
                                 >
                                     <Box sx={{ py: 3 }}>
@@ -1079,7 +1163,9 @@ export const TimeEntries = () => {
                                         {entry.end_time && format(parseISO(entry.end_time), 'yyyy-MM-dd HH:mm')}
                                     </TableCell>
                                     <TableCell>{calculateDuration(entry)}</TableCell>
-                                    <TableCell>${calculateCost(entry)}</TableCell>
+                                    {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                                        <TableCell>${calculateCost(entry)}</TableCell>
+                                    )}
                                     <TableCell>
                                         <Tooltip 
                                             title={entry.rejection_reason ? `Rejection reason: ${entry.rejection_reason}` : ''} 
@@ -1178,11 +1264,13 @@ export const TimeEntries = () => {
                                 Total Hours: {totalHours.toFixed(2)}
                             </Typography>
                         </Grid>
-                        <Grid item xs={12} md={6}>
-                            <Typography variant="h6">
-                                Total Cost: ${totalCost.toFixed(2)}
-                            </Typography>
-                        </Grid>
+                        {(user?.is_superuser || user?.role === UserRole.MANAGER) && (
+                            <Grid item xs={12} md={6}>
+                                <Typography variant="h6">
+                                    Total Cost: ${totalCost.toFixed(2)}
+                                </Typography>
+                            </Grid>
+                        )}
                     </Grid>
                 </Paper>
             </Box>

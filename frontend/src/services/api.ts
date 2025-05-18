@@ -196,6 +196,7 @@ export interface ReportParams {
 
 export const generateReport = async (params: ReportParams) => {
     try {
+        console.log('Making API request with params:', params);
         const response = await api.post('/reports/generate', params, {
             responseType: 'blob',
             headers: {
@@ -205,22 +206,35 @@ export const generateReport = async (params: ReportParams) => {
         });
 
         // Check if the response is actually a PDF
-        if (response.headers['content-type'] !== 'application/pdf') {
-            throw new Error('Invalid response type received from server');
+        const contentType = response.headers['content-type'];
+        console.log('Response content type:', contentType);
+        
+        if (!contentType || !contentType.includes('application/pdf')) {
+            throw new Error(`Invalid response type: ${contentType}`);
         }
 
         return response;
     } catch (error: any) {
-        // If the error response is a blob, try to read it
+        console.error('Error in generateReport:', error);
+        
+        // If the error response is a blob, read it as text
         if (error.response?.data instanceof Blob) {
+            const text = await error.response.data.text();
             try {
-                const text = await error.response.data.text();
                 const errorData = JSON.parse(text);
-                throw new Error(errorData.detail || errorData.message || 'Failed to generate report');
+                throw new Error(errorData.detail || 'Failed to generate report');
             } catch (e) {
-                throw new Error('Failed to generate report: Invalid server response');
+                console.error('Error parsing error response:', e);
+                throw new Error('Failed to generate report: Server error');
             }
         }
-        throw new Error(error.response?.data?.detail || error.message || 'Failed to generate report');
+
+        // Handle non-blob error responses
+        const errorMessage = error.response?.data?.detail 
+            || error.response?.data?.message 
+            || error.message 
+            || 'Failed to generate report';
+            
+        throw new Error(errorMessage);
     }
 }; 

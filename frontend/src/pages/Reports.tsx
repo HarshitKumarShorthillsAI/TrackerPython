@@ -105,22 +105,35 @@ export const Reports = () => {
         }
     });
 
-    // Filter projects based on user role and team membership
+    // Filter projects based on user role, team membership, and selected employee
     const availableProjects = React.useMemo(() => {
         if (!projects || !user || isLoadingProjects) return [];
 
-        // Superusers and managers can see all projects
-        if (user.is_superuser || user.role === UserRole.MANAGER) {
+        // If no employee is selected and user is superuser/manager, show all projects
+        if (!selectedUser && (user.is_superuser || user.role === UserRole.MANAGER)) {
             return projects;
         }
 
-        // Regular users can only see projects where they are team members
-        return projects.filter((project: ProjectWithTeam) => {
-            // Check if team_members exists and is an array before using some()
-            return Array.isArray(project.team_members) && 
-                project.team_members.some((member: User) => member.id === user.id);
-        });
-    }, [projects, user, isLoadingProjects]);
+        // If an employee is selected (by manager/superuser), show only their projects
+        if (selectedUser && (user.is_superuser || user.role === UserRole.MANAGER)) {
+            return projects.filter((project: ProjectWithTeam) => 
+                Array.isArray(project.team_members) && 
+                project.team_members.some((member: User) => member.id === Number(selectedUser))
+            );
+        }
+
+        // For regular users, show only their projects
+        return projects.filter((project: ProjectWithTeam) => 
+            Array.isArray(project.team_members) && 
+            project.team_members.some((member: User) => member.id === user.id)
+        );
+    }, [projects, user, isLoadingProjects, selectedUser]);
+
+    // Reset project and task selection when employee changes
+    React.useEffect(() => {
+        setSelectedProject('');
+        setSelectedTask('');
+    }, [selectedUser]);
 
     // Get available tasks based on selected project
     const availableTasks = React.useMemo(() => {
@@ -168,16 +181,15 @@ export const Reports = () => {
             
             // Create a payload with proper types
             const payload = {
-                user_id: selectedUser ? Number(selectedUser) : (user?.id || undefined),
+                start_date: formattedStartDate,
+                end_date: formattedEndDate,
+                user_id: selectedUser ? Number(selectedUser) : undefined,
                 project_id: selectedProject ? Number(selectedProject) : undefined,
                 task_id: selectedTask ? Number(selectedTask) : undefined,
-                status: selectedStatus || undefined,
-                start_date: formattedStartDate,
-                end_date: formattedEndDate
+                status: selectedStatus || undefined
             };
-            
-            console.log('Sending report request with payload:', payload);
-            
+
+            console.log('Generating report with payload:', payload);
             const response = await api.generateReport(payload);
             
             if (!response || !response.data) {
@@ -194,41 +206,11 @@ export const Reports = () => {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
+            
             enqueueSnackbar('Report generated successfully', { variant: 'success' });
         } catch (error: any) {
             console.error('Error generating report:', error);
-            let errorMessage = 'Failed to generate report';
-            
-            if (error.response) {
-                console.log('Error response status:', error.response.status);
-                console.log('Error response headers:', error.response.headers);
-                
-                // Try to extract error message from response
-                if (error.response.data) {
-                    if (error.response.data instanceof Blob) {
-                        try {
-                            const text = await error.response.data.text();
-                            try {
-                                const errorData = JSON.parse(text);
-                                errorMessage = errorData.detail || errorData.message || errorMessage;
-                            } catch (e) {
-                                // If can't parse as JSON, use the text directly
-                                errorMessage = text || errorMessage;
-                            }
-                        } catch (e) {
-                            console.error('Error parsing error response:', e);
-                        }
-                    } else if (typeof error.response.data === 'object') {
-                        errorMessage = error.response.data.detail || error.response.data.message || errorMessage;
-                    } else if (typeof error.response.data === 'string') {
-                        errorMessage = error.response.data;
-                    }
-                }
-            } else if (error.message) {
-                errorMessage = error.message;
-            }
-            
-            enqueueSnackbar(errorMessage, { variant: 'error' });
+            enqueueSnackbar(error.message || 'Failed to generate report', { variant: 'error' });
         } finally {
             setIsGeneratingReport(false);
         }
