@@ -8,6 +8,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from io import BytesIO
+from pydantic import BaseModel
 
 from app.api import deps
 from app.crud.crud_time_entry import crud_time_entry
@@ -18,6 +19,14 @@ from app.models.time_entry import TimeEntry, TimeEntryStatus
 from app.models.project import Project
 
 router = APIRouter()
+
+class GenerateReportRequest(BaseModel):
+    start_date: str
+    end_date: str
+    user_id: Optional[int] = None
+    project_id: Optional[int] = None
+    task_id: Optional[int] = None
+    status: Optional[TimeEntryStatus] = None
 
 def create_pdf_report(
     time_entries: list[TimeEntry],
@@ -132,7 +141,7 @@ def create_pdf_report(
                 task_title,
                 entry.description or "-",
                 f"{hours:.2f}",
-                entry.status
+                entry.status.value if entry.status else "-"
             ])
 
         table = Table(data)
@@ -166,19 +175,24 @@ def create_pdf_report(
 @router.post("/generate")
 async def generate_report(
     *,
-    start_date: date,
-    end_date: date,
+    request: GenerateReportRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    user_id: Optional[int] = None,
-    project_id: Optional[int] = None,
-    task_id: Optional[int] = None,
-    status: Optional[TimeEntryStatus] = None,
 ):
     """Generate a PDF report of time entries."""
     try:
+        # Convert string dates to Python date objects
+        try:
+            start = datetime.strptime(request.start_date, '%Y-%m-%d').date()
+            end = datetime.strptime(request.end_date, '%Y-%m-%d').date()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid date format. Dates must be in YYYY-MM-DD format. Error: {str(e)}"
+            )
+
         # Check permissions
-        if user_id and user_id != current_user.id:
+        if request.user_id and request.user_id != current_user.id:
             if not (current_user.is_superuser or current_user.role == UserRole.MANAGER):
                 raise HTTPException(
                     status_code=403,
@@ -194,23 +208,23 @@ async def generate_report(
 
         # Apply date filters using func.date to compare only dates
         query = query.filter(
-            func.date(TimeEntry.start_time) >= start_date,
-            func.date(TimeEntry.start_time) <= end_date
+            func.date(TimeEntry.start_time) >= start,
+            func.date(TimeEntry.start_time) <= end
         )
 
         # Apply user and project filters
-        if user_id:
-            query = query.filter(TimeEntry.user_id == user_id)
+        if request.user_id:
+            query = query.filter(TimeEntry.user_id == request.user_id)
         else:
             if not current_user.is_superuser:
                 query = query.filter(TimeEntry.user_id == current_user.id)
 
-        if project_id:
-            query = query.filter(TimeEntry.project_id == project_id)
+        if request.project_id:
+            query = query.filter(TimeEntry.project_id == request.project_id)
             # If user is a manager, verify they manage this project
             if current_user.role == UserRole.MANAGER:
                 project = db.query(Project).filter(
-                    Project.id == project_id,
+                    Project.id == request.project_id,
                     Project.manager_id == current_user.id
                 ).first()
                 if not project:
@@ -220,12 +234,12 @@ async def generate_report(
                     )
 
         # Apply task filter
-        if task_id:
-            query = query.filter(TimeEntry.task_id == task_id)
+        if request.task_id:
+            query = query.filter(TimeEntry.task_id == request.task_id)
 
         # Apply status filter
-        if status:
-            query = query.filter(TimeEntry.status == status)
+        if request.status:
+            query = query.filter(TimeEntry.status == request.status)
 
         # Get the time entries
         time_entries = query.order_by(TimeEntry.start_time.desc()).all()
@@ -241,11 +255,11 @@ async def generate_report(
             pdf = create_pdf_report(
                 time_entries=time_entries,
                 user=current_user,
-                start_date=start_date,
-                end_date=end_date,
-                project_id=project_id,
-                task_id=task_id,
-                status=status,
+                start_date=start,
+                end_date=end,
+                project_id=request.project_id,
+                task_id=request.task_id,
+                status=request.status,
                 db=db
             )
         except Exception as e:
