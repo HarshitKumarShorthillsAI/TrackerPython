@@ -4,6 +4,7 @@ import { useFormik } from 'formik';
 import * as yup from 'yup';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { Link } from '@mui/material';
 
 const validationSchema = yup.object({
     email: yup.string().email('Enter a valid email').required('Email is required'),
@@ -72,11 +73,18 @@ export const Login = () => {
                             type="submit"
                             fullWidth
                             variant="contained"
+                            disabled={formik.isSubmitting}
                             sx={{ mt: 3, mb: 2 }}
                         >
-                            Sign In
+                            {formik.isSubmitting ? 'Signing in...' : 'Sign In'}
                         </Button>
                     </form>
+
+                    <Box sx={{ textAlign: 'center' }}>
+                        <Link href="/forgot-password" variant="body2">
+                            Forgot password?
+                        </Link>
+                    </Box>
                 </Paper>
             </Box>
         </Container>

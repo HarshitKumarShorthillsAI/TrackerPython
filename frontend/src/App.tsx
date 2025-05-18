@@ -13,7 +13,10 @@ import { Tasks } from './pages/Tasks';
 import { Users } from './pages/Users';
 import { Reports } from './pages/Reports';
 import MonthlyQuotas from './pages/MonthlyQuotas';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import { UserRole } from './types';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 const queryClient = new QueryClient();
 
@@ -28,20 +31,6 @@ const theme = createTheme({
     },
 });
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-    const { user, isLoading } = useAuth();
-
-    if (isLoading) {
-        return null;
-    }
-
-    if (!user) {
-        return <Navigate to="/login" />;
-    }
-
-    return children;
-};
-
 const App = () => {
     return (
         <QueryClientProvider client={queryClient}>
@@ -52,6 +41,8 @@ const App = () => {
                             <BrowserRouter>
                                 <Routes>
                                     <Route path="/login" element={<Login />} />
+                                    <Route path="/forgot-password" element={<ForgotPassword />} />
+                                    <Route path="/reset-password" element={<ResetPassword />} />
                                     <Route
                                         path="/"
                                         element={

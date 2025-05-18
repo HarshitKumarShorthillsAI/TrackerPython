@@ -526,6 +526,28 @@ export const TimeEntries = () => {
         }
     });
 
+    // Add delete mutation
+    const deleteEntryMutation = useMutation({
+        mutationFn: (id: number) => api.deleteTimeEntry(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['timeEntries'] });
+            enqueueSnackbar('Time entry deleted successfully', { variant: 'success' });
+        },
+        onError: (error: any) => {
+            enqueueSnackbar(error.message || 'Failed to delete time entry', { variant: 'error' });
+        },
+    });
+
+    const handleDeleteTimeEntry = async (id: number) => {
+        if (window.confirm('Are you sure you want to delete this time entry?')) {
+            try {
+                await deleteEntryMutation.mutateAsync(id);
+            } catch (error) {
+                console.error('Error deleting time entry:', error);
+            }
+        }
+    };
+
     // Timer functionality
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
@@ -870,25 +892,27 @@ export const TimeEntries = () => {
 
     // Calculate remaining hours for the month
     const calculateRemainingHours = () => {
-        if (!currentMonthQuota || !timeEntries) return null;
+        if (!currentMonthQuota || !timeEntries || !user) return null;
 
         const monthStart = new Date(currentYear, currentDate.getMonth(), 1);
         const monthEnd = new Date(currentYear, currentDate.getMonth() + 1, 0);
         
-        // Calculate total hours worked this month
-        const monthlyWorkedHours = timeEntries.reduce((total, entry) => {
-            if (!entry.end_time) return total;
-            const start = parseISO(entry.start_time);
-            const end = parseISO(entry.end_time);
-            
-            // Only count if the entry is in the current month
-            if (isWithinInterval(start, { start: monthStart, end: monthEnd }) ||
-                isWithinInterval(end, { start: monthStart, end: monthEnd })) {
-                const hours = differenceInMinutes(end, start) / 60;
-                return total + hours;
-            }
-            return total;
-        }, 0);
+        // Calculate total hours worked this month for the logged-in user only
+        const monthlyWorkedHours = timeEntries
+            .filter(entry => entry.user_id === user.id) // Filter for logged-in user
+            .reduce((total, entry) => {
+                if (!entry.end_time) return total;
+                const start = parseISO(entry.start_time);
+                const end = parseISO(entry.end_time);
+                
+                // Only count if the entry is in the current month
+                if (isWithinInterval(start, { start: monthStart, end: monthEnd }) ||
+                    isWithinInterval(end, { start: monthStart, end: monthEnd })) {
+                    const hours = differenceInMinutes(end, start) / 60;
+                    return total + hours;
+                }
+                return total;
+            }, 0);
 
         return {
             totalQuota: currentMonthQuota.monthly_hours,
@@ -1014,7 +1038,7 @@ export const TimeEntries = () => {
                         <Card>
                             <CardContent>
                                 <Typography variant="h6" color="textSecondary" gutterBottom>
-                                    Monthly Hours
+                                    My Monthly Hours
                                 </Typography>
                                 <Typography variant="h3">
                                     {monthlyStats?.workedHours.toFixed(2) || '0.00'}
@@ -1022,6 +1046,11 @@ export const TimeEntries = () => {
                                 <Typography variant="body2" color="textSecondary">
                                     {format(new Date(), 'MMMM yyyy')}
                                 </Typography>
+                                {user?.is_superuser || user?.role === UserRole.MANAGER ? (
+                                    <Typography variant="caption" color="textSecondary" display="block">
+                                        Showing your personal hours only
+                                    </Typography>
+                                ) : null}
                             </CardContent>
                         </Card>
                     </Grid>
@@ -1270,10 +1299,17 @@ export const TimeEntries = () => {
                                                     <IconButton onClick={() => handleEditTimeEntry(entry)} size="small">
                                                         <Edit />
                                                     </IconButton>
+                                                    <IconButton 
+                                                        onClick={() => handleDeleteTimeEntry(entry.id)}
+                                                        size="small"
+                                                        color="error"
+                                                    >
+                                                        <Delete />
+                                                    </IconButton>
                                                     <IconButton
+                                                        onClick={() => handleSubmitTimeEntry(entry.id)}
                                                         size="small"
                                                         color="primary"
-                                                        onClick={() => handleSubmitTimeEntry(entry.id)}
                                                     >
                                                         <Send />
                                                     </IconButton>
@@ -1377,30 +1413,110 @@ export const TimeEntries = () => {
                         </Grid>
                         <Grid item xs={12}>
                             <LocalizationProvider dateAdapter={AdapterDateFns}>
-                                <DateTimePicker
-                                    label="Start Time"
+                                <DatePicker
+                                    label="Date"
                                     value={editData.start_time ? parseISO(editData.start_time) : null}
-                                    onChange={(newValue) =>
-                                        setEditData({
-                                            ...editData,
-                                            start_time: newValue?.toISOString()
-                                        })
-                                    }
+                                    onChange={(newDate) => {
+                                        if (newDate) {
+                                            try {
+                                                const currentStart = editData.start_time ? parseISO(editData.start_time) : new Date();
+                                                const currentEnd = editData.end_time ? parseISO(editData.end_time) : new Date();
+                                                
+                                                // Create new dates preserving the time
+                                                const newStart = new Date(
+                                                    newDate.getFullYear(),
+                                                    newDate.getMonth(),
+                                                    newDate.getDate(),
+                                                    currentStart.getHours(),
+                                                    currentStart.getMinutes()
+                                                );
+                                                
+                                                const newEnd = new Date(
+                                                    newDate.getFullYear(),
+                                                    newDate.getMonth(),
+                                                    newDate.getDate(),
+                                                    currentEnd.getHours(),
+                                                    currentEnd.getMinutes()
+                                                );
+                                                
+                                                setEditData({
+                                                    ...editData,
+                                                    start_time: newStart.toISOString(),
+                                                    end_time: newEnd.toISOString()
+                                                });
+                                            } catch (error) {
+                                                console.error('Error updating date:', error);
+                                                enqueueSnackbar('Error updating date', { variant: 'error' });
+                                            }
+                                        }
+                                    }}
                                     sx={{ width: '100%' }}
                                 />
                             </LocalizationProvider>
                         </Grid>
-                        <Grid item xs={12}>
+                        <Grid item xs={12} sm={6}>
                             <LocalizationProvider dateAdapter={AdapterDateFns}>
-                                <DateTimePicker
+                                <TimePicker
+                                    label="Start Time"
+                                    value={editData.start_time ? parseISO(editData.start_time) : null}
+                                    onChange={(newTime) => {
+                                        if (newTime) {
+                                            try {
+                                                const currentDate = editData.start_time ? parseISO(editData.start_time) : new Date();
+                                                const newDateTime = new Date(
+                                                    currentDate.getFullYear(),
+                                                    currentDate.getMonth(),
+                                                    currentDate.getDate(),
+                                                    newTime.getHours(),
+                                                    newTime.getMinutes()
+                                                );
+                                                setEditData({
+                                                    ...editData,
+                                                    start_time: newDateTime.toISOString()
+                                                });
+                                            } catch (error) {
+                                                console.error('Error updating start time:', error);
+                                                enqueueSnackbar('Error updating start time', { variant: 'error' });
+                                            }
+                                        }
+                                    }}
+                                    sx={{ width: '100%' }}
+                                />
+                            </LocalizationProvider>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <LocalizationProvider dateAdapter={AdapterDateFns}>
+                                <TimePicker
                                     label="End Time"
                                     value={editData.end_time ? parseISO(editData.end_time) : null}
-                                    onChange={(newValue) =>
-                                        setEditData({
-                                            ...editData,
-                                            end_time: newValue?.toISOString()
-                                        })
-                                    }
+                                    onChange={(newTime) => {
+                                        if (newTime) {
+                                            try {
+                                                const currentDate = editData.end_time ? parseISO(editData.end_time) : new Date();
+                                                const newDateTime = new Date(
+                                                    currentDate.getFullYear(),
+                                                    currentDate.getMonth(),
+                                                    currentDate.getDate(),
+                                                    newTime.getHours(),
+                                                    newTime.getMinutes()
+                                                );
+                                                
+                                                // Validate that end time is after start time
+                                                if (editData.start_time && newDateTime <= parseISO(editData.start_time)) {
+                                                    enqueueSnackbar('End time must be after start time', { variant: 'error' });
+                                                    return;
+                                                }
+                                                
+                                                setEditData({
+                                                    ...editData,
+                                                    end_time: newDateTime.toISOString()
+                                                });
+                                            } catch (error) {
+                                                console.error('Error updating end time:', error);
+                                                enqueueSnackbar('Error updating end time', { variant: 'error' });
+                                            }
+                                        }
+                                    }}
                                     sx={{ width: '100%' }}
                                 />
                             </LocalizationProvider>
@@ -1409,7 +1525,12 @@ export const TimeEntries = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-                    <Button onClick={handleUpdateTimeEntry} variant="contained" color="primary">
+                    <Button 
+                        onClick={handleUpdateTimeEntry} 
+                        variant="contained" 
+                        color="primary"
+                        disabled={!editData.description || !editData.start_time || !editData.end_time}
+                    >
                         Save
                     </Button>
                 </DialogActions>

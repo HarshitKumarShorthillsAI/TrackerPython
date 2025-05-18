@@ -12,10 +12,11 @@ api.interceptors.request.use((config) => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
-    // Add trailing slash to URLs that don't have one
-    if (!config.url?.endsWith('/')) {
-        config.url = `${config.url}/`;
+    
+    if (config.url) {
+        config.url = config.url.replace(/\/+$/, '');
     }
+    
     return config;
 });
 
@@ -128,7 +129,7 @@ export const getTimeEntries = async (
     end_date?: string
 ) => {
     try {
-        let url = '/time-entries/';
+        let url = '/time-entries';
         const params = new URLSearchParams();
         
         if (user_id) params.append('user_id', user_id.toString());
@@ -155,8 +156,17 @@ export const createTimeEntry = async (data: Partial<TimeEntry>): Promise<TimeEnt
 };
 
 export const updateTimeEntry = async (id: number, data: Partial<TimeEntry>): Promise<TimeEntry> => {
-    const response = await api.put(`/time-entries/${id}`, data);
-    return response.data;
+    try {
+        const response = await api.put(`/time-entries/${id}`, data);
+        return response.data;
+    } catch (error: any) {
+        console.error('Error updating time entry:', error);
+        const errorMessage = error.response?.data?.detail 
+            || error.response?.data?.message 
+            || error.message 
+            || 'Failed to update time entry';
+        throw new Error(errorMessage);
+    }
 };
 
 export const deleteTimeEntry = async (id: number): Promise<void> => {
@@ -173,10 +183,8 @@ export const approveTimeEntry = async (id: number): Promise<TimeEntry> => {
     return response.data;
 };
 
-export const rejectTimeEntry = async (id: number, reason: string): Promise<TimeEntry> => {
-    const response = await api.post(`/time-entries/${id}/reject`, null, {
-        params: { rejection_reason: reason }
-    });
+export const rejectTimeEntry = async (id: number, rejection_reason: string): Promise<TimeEntry> => {
+    const response = await api.post(`/time-entries/${id}/reject?rejection_reason=${encodeURIComponent(rejection_reason)}`);
     return response.data;
 };
 
@@ -255,4 +263,12 @@ export const sendReportEmail = async (params: SendReportEmailParams) => {
             || 'Failed to send report';
         throw new Error(errorMessage);
     }
+};
+
+export const forgotPassword = async (email: string): Promise<void> => {
+    await api.post('/auth/forgot-password', { email });
+};
+
+export const resetPassword = async (token: string, new_password: string): Promise<void> => {
+    await api.post('/auth/reset-password', { token, new_password });
 }; 

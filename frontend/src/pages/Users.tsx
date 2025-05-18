@@ -26,7 +26,6 @@ import { useAuth } from '../contexts/AuthContext';
 
 interface UserFormData {
     email: string;
-    username: string;
     full_name: string;
     password?: string;
     hourly_rate?: number;
@@ -39,7 +38,6 @@ export const Users = () => {
     const [editingUser, setEditingUser] = useState<User | null>(null);
     const [formData, setFormData] = useState<UserFormData>({
         email: '',
-        username: '',
         full_name: '',
         password: '',
         hourly_rate: 0,
@@ -82,7 +80,6 @@ export const Users = () => {
             setEditingUser(user);
             setFormData({
                 email: user.email,
-                username: user.username,
                 full_name: user.full_name,
                 hourly_rate: user.hourly_rate,
                 role: user.role,
@@ -92,7 +89,6 @@ export const Users = () => {
             setEditingUser(null);
             setFormData({
                 email: '',
-                username: '',
                 full_name: '',
                 password: '',
                 hourly_rate: 0,
@@ -114,7 +110,6 @@ export const Users = () => {
                 id: editingUser.id,
                 user: {
                     email: formData.email,
-                    username: formData.username,
                     full_name: formData.full_name,
                     hourly_rate: formData.hourly_rate,
                     role: formData.role,
@@ -125,7 +120,6 @@ export const Users = () => {
         } else {
             createMutation.mutate({
                 email: formData.email,
-                username: formData.email,
                 full_name: formData.full_name,
                 password: formData.password || '',
                 hourly_rate: formData.hourly_rate,
@@ -214,13 +208,15 @@ export const Users = () => {
                                     >
                                         <Edit />
                                     </IconButton>
-                                    <IconButton
-                                        size="small"
-                                        color="error"
-                                        onClick={() => deleteMutation.mutate(user.id)}
-                                    >
-                                        <Delete />
-                                    </IconButton>
+                                    {!user.is_superuser && (
+                                        <IconButton
+                                            size="small"
+                                            color="error"
+                                            onClick={() => deleteMutation.mutate(user.id)}
+                                        >
+                                            <Delete />
+                                        </IconButton>
+                                    )}
                                 </Box>
                             </CardContent>
                         </Card>
@@ -240,11 +236,7 @@ export const Users = () => {
                                 type="email"
                                 value={formData.email}
                                 onChange={(e) =>
-                                    setFormData({ 
-                                        ...formData, 
-                                        email: e.target.value,
-                                        username: e.target.value
-                                    })
+                                    setFormData({ ...formData, email: e.target.value })
                                 }
                                 margin="normal"
                             />
@@ -314,17 +306,17 @@ export const Users = () => {
                             <FormControl fullWidth margin="normal">
                                 <InputLabel>Status</InputLabel>
                                 <Select
-                                    value={formData.is_active}
+                                    value={formData.is_active ? "active" : "inactive"}
                                     onChange={(e) =>
                                         setFormData({
                                             ...formData,
-                                            is_active: e.target.value as boolean,
+                                            is_active: e.target.value === "active",
                                         })
                                     }
                                     label="Status"
                                 >
-                                    <MenuItem value={true}>Active</MenuItem>
-                                    <MenuItem value={false}>Inactive</MenuItem>
+                                    <MenuItem value="active">Active</MenuItem>
+                                    <MenuItem value="inactive">Inactive</MenuItem>
                                 </Select>
                             </FormControl>
                         </Grid>
