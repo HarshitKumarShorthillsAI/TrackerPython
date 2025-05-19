@@ -17,6 +17,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import { UserRole } from './types';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { Charts } from './pages/Charts';
 
 const queryClient = new QueryClient();
 
@@ -56,6 +57,7 @@ const App = () => {
                                         <Route path="projects" element={<Projects />} />
                                         <Route path="tasks" element={<Tasks />} />
                                         <Route path="reports" element={<Reports />} />
+                                        <Route path="charts" element={<Charts />} />
                                         <Route path="users" element={<Users />} />
                                         <Route path="monthly-quotas" element={<MonthlyQuotas />} />
                                     </Route>

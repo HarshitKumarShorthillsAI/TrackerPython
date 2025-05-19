@@ -195,7 +195,8 @@ export const Reports = () => {
                 user_id: selectedUser ? Number(selectedUser) : undefined,
                 project_id: selectedProject ? Number(selectedProject) : undefined,
                 task_id: selectedTask ? Number(selectedTask) : undefined,
-                status: selectedStatus || undefined
+                status: selectedStatus || undefined,
+                include_report_info: true // Always include report generation info
             };
 
             console.log('Generating report with payload:', payload);
@@ -209,17 +210,29 @@ export const Reports = () => {
             const blob = new Blob([response.data], { type: 'application/pdf' });
             const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
+            
+            // Get filename from Content-Disposition header if available
+            const contentDisposition = response.headers?.['content-disposition'];
+            let filename = 'timesheet-report.pdf';
+            
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch) {
+                    filename = filenameMatch[1];
+                }
+            }
+            
             link.href = url;
-            link.setAttribute('download', `timesheet-report-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
-            link.remove();
+            document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
             
             enqueueSnackbar('Report generated successfully', { variant: 'success' });
-        } catch (error: any) {
+        } catch (error) {
             console.error('Error generating report:', error);
-            enqueueSnackbar(error.message || 'Failed to generate report', { variant: 'error' });
+            enqueueSnackbar('Failed to generate report', { variant: 'error' });
         } finally {
             setIsGeneratingReport(false);
         }

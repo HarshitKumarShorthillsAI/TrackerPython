@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppBar, Box, CssBaseline, Drawer, IconButton, List, ListItem, ListItemIcon, ListItemText, Toolbar, Typography } from '@mui/material';
-import { Menu as MenuIcon, Timer, Assignment, FolderOpen, People, Logout, Assessment, CalendarMonth } from '@mui/icons-material';
+import { Menu as MenuIcon, Timer, Assignment, FolderOpen, People, Logout, Assessment, CalendarMonth, PieChart } from '@mui/icons-material';
+
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
@@ -19,6 +20,7 @@ export const MainLayout = () => {
         { text: 'Tasks', icon: <Assignment />, path: '/tasks' },
         { text: 'Projects', icon: <FolderOpen />, path: '/projects' },
         { text: 'Reports', icon: <Assessment />, path: '/reports' },
+        { text: 'Charts', icon: <PieChart />, path: '/charts' },
     ];
 
     if (isAdmin()) {
